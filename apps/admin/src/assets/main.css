@@ -1,0 +1,4 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+/* 您原有的其他自定义 css 可以保持紧随其后不变 */
