@@ -4,10 +4,12 @@ import { ConfigService } from '@nestjs/config'
 import { NestFactory } from '@nestjs/core'
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 import { AppModule } from './app.module'
+import { RealtimeService } from './realtime/realtime.service'
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule)
   const config = app.get(ConfigService)
+  app.get(RealtimeService).attach(app.getHttpServer())
 
   app.setGlobalPrefix('api')
   app.enableCors()

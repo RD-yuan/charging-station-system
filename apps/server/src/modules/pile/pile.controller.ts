@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common'
+import { Body, Controller, Get, Inject, Param, Post } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
 import { DispatchStrategyType } from '../../common/enums'
 import { PileService } from './pile.service'
@@ -6,7 +6,7 @@ import { PileService } from './pile.service'
 @ApiTags('piles')
 @Controller('admin/piles')
 export class PileController {
-  constructor(private readonly pileService: PileService) {}
+  constructor(@Inject(PileService) private readonly pileService: PileService) {}
 
   @Get()
   list() {
@@ -35,11 +35,20 @@ export class PileController {
 
   @Post(':pileId/reschedule')
   reschedule(@Param('pileId') pileId: string, @Body('strategyType') strategyType: DispatchStrategyType) {
-    return this.pileService.reschedule(pileId, strategyType)
+    return this.pileService.reschedule(pileId, normalizeStrategy(strategyType))
   }
 
   @Post(':pileId/recover')
   recover(@Param('pileId') pileId: string) {
     return this.pileService.recover(pileId)
   }
+
+  @Post(':pileId/control')
+  control(@Param('pileId') pileId: string, @Body() body: { action: string; targetState?: string }) {
+    return this.pileService.control(pileId, body.action, body.targetState)
+  }
+}
+
+function normalizeStrategy(strategyType: DispatchStrategyType | string) {
+  return strategyType === 'PRIORITY_QUEUE' ? DispatchStrategyType.PRIORITY : strategyType as DispatchStrategyType
 }

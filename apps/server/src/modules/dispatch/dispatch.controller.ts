@@ -1,12 +1,13 @@
-import { Body, Controller, Param, Post } from '@nestjs/common'
+import { Body, Controller, Inject, Param, Post } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
-import { ChargeMode, DispatchStrategyType } from '../../common/enums'
+import { ChargeMode } from '@prisma/client'
+import { DispatchStrategyType } from '../../common/enums'
 import { DispatchService } from './dispatch.service'
 
 @ApiTags('dispatch')
 @Controller('dispatch')
 export class DispatchController {
-  constructor(private readonly dispatchService: DispatchService) {}
+  constructor(@Inject(DispatchService) private readonly dispatchService: DispatchService) {}
 
   @Post('basic/:mode')
   basic(@Param('mode') mode: ChargeMode) {
@@ -24,6 +25,22 @@ export class DispatchController {
   }
 
   @Post('batch-optimization')
+  batch(@Body() body: { spotsCount: number }) {
+    return this.dispatchService.triggerBatchOptimization(body)
+  }
+}
+
+@ApiTags('admin optimization')
+@Controller('admin/optimization')
+export class AdminOptimizationController {
+  constructor(@Inject(DispatchService) private readonly dispatchService: DispatchService) {}
+
+  @Post('single')
+  single(@Body() body: { spotsCount: number; mode: ChargeMode }) {
+    return this.dispatchService.triggerSingleOptimization(body)
+  }
+
+  @Post('batch')
   batch(@Body() body: { spotsCount: number }) {
     return this.dispatchService.triggerBatchOptimization(body)
   }
