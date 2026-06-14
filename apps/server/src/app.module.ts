@@ -6,11 +6,13 @@ import { DispatchModule } from './modules/dispatch/dispatch.module'
 import { PileModule } from './modules/pile/pile.module'
 import { ReportModule } from './modules/report/report.module'
 import { PrismaModule } from './prisma/prisma.module'
+import { RedisModule } from './redis/redis.module'
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    RedisModule,
     AuthModule,
     ChargingModule,
     PileModule,
