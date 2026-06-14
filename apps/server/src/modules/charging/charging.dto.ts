@@ -2,9 +2,6 @@ import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator'
 import { ChargeMode } from '../../common/enums'
 
 export class SubmitChargingRequestDto {
-  @IsString()
-  userId!: string
-
   @IsEnum(ChargeMode)
   chargeMode!: ChargeMode
 

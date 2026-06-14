@@ -25,6 +25,10 @@ export class DispatchService {
     return this.safeSchedule('/dispatch/batch-optimization', payload)
   }
 
+  async triggerRecoveryTimeOrder() {
+    return this.safeSchedule('/dispatch/recovery-time-order', {})
+  }
+
   private async safeSchedule(path: string, payload: unknown) {
     try {
       return await this.schedulerClient.post(path, payload)

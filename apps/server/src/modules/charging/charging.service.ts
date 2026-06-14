@@ -16,11 +16,11 @@ export class ChargingService {
     private readonly dispatchService: DispatchService
   ) {}
 
-  async submitRequest(dto: SubmitChargingRequestDto) {
+  async submitRequest(dto: SubmitChargingRequestDto, userId: string) {
     const queueNo = await this.nextQueueNo(dto.chargeMode)
     const order = await this.prisma.chargingOrder.create({
       data: {
-        userId: dto.userId,
+        userId,
         chargeMode: dto.chargeMode,
         requestedAmount: dto.requestedAmount,
         queueNo,

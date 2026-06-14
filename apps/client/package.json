@@ -1,5 +1,5 @@
 {
-  "name": "chargepilemanage-admin",
+  "name": "@charging/client",
   "private": true,
   "version": "0.0.0",
   "type": "module",

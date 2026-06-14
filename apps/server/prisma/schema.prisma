@@ -32,10 +32,16 @@ enum WorkingState {
   FAULT
 }
 
+enum UserRole {
+  USER
+  ADMIN
+}
+
 model User {
   id              String          @id @default(cuid())
   username        String          @unique
   passwordHash    String
+  role            UserRole        @default(USER)
   batteryCapacity Float           @default(60)
   orders          ChargingOrder[]
   createdAt       DateTime        @default(now())

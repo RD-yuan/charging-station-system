@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
+import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import {
   CancelChargingDto,
   ModifyAmountDto,
@@ -14,8 +15,8 @@ export class ChargingController {
   constructor(private readonly chargingService: ChargingService) {}
 
   @Post('request')
-  submitRequest(@Body() dto: SubmitChargingRequestDto) {
-    return this.chargingService.submitRequest(dto)
+  submitRequest(@Body() dto: SubmitChargingRequestDto, @CurrentUser('userId') userId: string) {
+    return this.chargingService.submitRequest(dto, userId)
   }
 
   @Put(':orderId/mode')
