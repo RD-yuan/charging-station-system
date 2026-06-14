@@ -7,13 +7,16 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "npm-run-all --parallel dev:client dev:server",
+    "dev": "npm-run-all --parallel dev:admin dev:client dev:server",
+    "dev:admin": "npm --workspace apps/admin run dev",
     "dev:client": "npm --workspace apps/client run dev",
     "dev:server": "npm --workspace apps/server run start:dev",
-    "build": "npm-run-all build:client build:server",
+    "build": "npm-run-all build:admin build:client build:server",
+    "build:admin": "npm --workspace apps/admin run build",
     "build:client": "npm --workspace apps/client run build",
     "build:server": "npm --workspace apps/server run build",
-    "lint": "npm-run-all lint:client lint:server",
+    "lint": "npm-run-all lint:admin lint:client lint:server",
+    "lint:admin": "npm --workspace apps/admin run lint",
     "lint:client": "npm --workspace apps/client run lint",
     "lint:server": "npm --workspace apps/server run lint",
     "test": "npm --workspace apps/server run test"
