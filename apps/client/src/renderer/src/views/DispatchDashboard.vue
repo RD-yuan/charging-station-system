@@ -51,18 +51,21 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { http } from '@/api/http'
 
 const singleForm = reactive({ spotsCount: 2, mode: 'FAST' })
 const batchForm = reactive({ spotsCount: 10 })
-const results = ref([
-  { orderId: 'O001', queueNo: 'F1', pileId: 'F01', projectedFinishTime: 1.2 }
-])
+const results = ref<Array<{ orderId: string; queueNo: string; pileId: string; projectedFinishTime: number }>>([])
 
-function runSingle() {
+async function runSingle() {
+  const { data } = await http.post('/admin/optimization/single', singleForm)
+  results.value = data.assignments ?? []
   ElMessage.success('单次最优调度已提交')
 }
 
-function runBatch() {
+async function runBatch() {
+  const { data } = await http.post('/admin/optimization/batch', batchForm)
+  results.value = data.assignments ?? []
   ElMessage.success('批量最优调度已提交')
 }
 </script>

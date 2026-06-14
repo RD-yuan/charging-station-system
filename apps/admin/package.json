@@ -1,12 +1,13 @@
 {
-  "name": "chargepilemanage-admin",
+  "name": "@charging/admin",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "vue-tsc -b"
   },
   "dependencies": {
     "lucide-vue-next": "^1.0.0",

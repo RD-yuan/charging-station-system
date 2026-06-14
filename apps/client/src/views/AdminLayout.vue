@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue' // 👈 1. 别忘了导入 onMounted
-onMounted
+import { ref, onMounted } from 'vue'
 import Sidebar from '../components/Sidebar.vue'
 import LoginView from './LoginView.vue'
 import DashboardView from './DashboardView.vue'
@@ -9,6 +8,57 @@ import ReportView from './ReportView.vue'
 import WebSocketView from './WebSocketView.vue'
 import ElectronView from './ElectronView.vue'
 
+type ChargeMode = 'FAST' | 'SLOW'
+type PhysicalState = 'ON' | 'OFF'
+type WorkingState = 'IDLE' | 'CHARGING' | 'FAULT'
+type SocketDirection = 'INCOMING' | 'OUTGOING' | 'SYSTEM'
+
+interface QueueCar {
+  id: string
+  queueNo: string
+  progress: number
+  userId: string
+  amount: number
+}
+
+interface Pile {
+  id: string
+  type: ChargeMode
+  physicalState: PhysicalState
+  workingState: WorkingState
+  lastActive: string
+  totalEnergy: number
+  queue: QueueCar[]
+}
+
+interface WaitingQueueItem {
+  orderId: string
+  userId: string
+  mode: ChargeMode
+  amount: number
+  queueNo: string
+  timestamp: string
+}
+
+interface BillingDetail {
+  id: string
+  pileId: string
+  userId: string
+  energy: number
+  duration: number
+  feeCharge: number
+  feeService: number
+  feeTotal: number
+  timestamp: string
+}
+
+interface SocketLog {
+  id: string
+  direction: SocketDirection
+  message: string
+  timestamp: string
+}
+
 // Session Admin State
 const adminName = ref<string | null>(null)
 const currentTab = ref('dashboard')
@@ -16,7 +66,7 @@ onMounted(() => {
   document.title = '智能充电桩 - 调度与计费管理后台'
 })
 // Mock Static Data representing active charging piles
-const piles = ref([
+const piles = ref<Pile[]>([
   {
     id: 'F01',
     type: 'FAST' as const,
@@ -62,21 +112,21 @@ const piles = ref([
 ])
 
 // Mock Static Waiting Queue
-const waitingQueue = ref([
+const waitingQueue = ref<WaitingQueueItem[]>([
   { orderId: 'o101', userId: 'user_05', mode: 'FAST' as const, amount: 40, queueNo: 'F3', timestamp: '10:08:12' },
   { orderId: 'o102', userId: 'user_06', mode: 'SLOW' as const, amount: 25, queueNo: 'T3', timestamp: '10:09:45' },
   { orderId: 'o103', userId: 'user_07', mode: 'FAST' as const, amount: 30, queueNo: 'F4', timestamp: '10:10:02' }
 ])
 
 // Mock Static Billing details
-const billingHistory = ref([
+const billingHistory = ref<BillingDetail[]>([
   { id: 'BILL-20260609-001', pileId: 'F01', userId: 'user_08', energy: 32.5, duration: 25, feeCharge: 32.5, feeService: 26.0, feeTotal: 58.5, timestamp: '10:01:14' },
   { id: 'BILL-20260609-002', pileId: 'T02', userId: 'user_09', energy: 15.0, duration: 60, feeCharge: 10.5, feeService: 12.0, feeTotal: 22.5, timestamp: '09:48:32' },
   { id: 'BILL-20260609-003', pileId: 'F02', userId: 'user_10', energy: 45.0, duration: 40, feeCharge: 45.0, feeService: 36.0, feeTotal: 81.0, timestamp: '09:20:05' }
 ])
 
 // Mock Socket log messages
-const socketLogs = ref([
+const socketLogs = ref<SocketLog[]>([
   { id: 'log1', direction: 'SYSTEM' as const, message: 'WebSocket 监听服务已成功绑定于 0.0.0.0:3000/ws/station 通道。', timestamp: '10:00:00' },
   { id: 'log2', direction: 'INCOMING' as const, message: '收到设备 F01 发送的主动上行状态帧: {"pileId":"F01","chargeRate":30,"workingMode":"FAST_CHARGING"}', timestamp: '10:05:01' },
   { id: 'log3', direction: 'OUTGOING' as const, message: '向排队子系统推送最适合叫号队列变更广播: {"action":"QUEUE_REPAIR","count":3}', timestamp: '10:08:14' }
@@ -139,7 +189,7 @@ const handleTriggerReschedule = ({ pileId, strategy }: { pileId: string; strateg
   target.queue = []
 
   // Simulate pushing back depending on selection strategy
-  affected.forEach((car, index) => {
+  affected.forEach((car) => {
     waitingQueue.value.unshift({
       orderId: 'o_' + car.id,
       userId: car.userId,
@@ -160,7 +210,7 @@ const handleTriggerReschedule = ({ pileId, strategy }: { pileId: string; strateg
   alert(`🚨 受到故障充电桩 ${pileId} 影响的 ${affected.length} 部车辆已安全转移！系统采用“${strategy === 'TIME_ORDER' ? '按原排队号排定' : '高优先叫号'}”算法，已被安全分派至其他排队队列中。`)
 }
 
-const handleSimulateBroadcast = ({ type, payload }: { type: string; payload: any }) => {
+const handleSimulateBroadcast = ({ type, payload }: { type: string; payload: unknown }) => {
   socketLogs.value.unshift({
     id: 'log_broad_' + Date.now(),
     direction: 'INCOMING',

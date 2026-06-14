@@ -55,51 +55,66 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { http } from '@/api/http'
 
-const piles = ref([
-  {
-    pileId: 'F01',
-    pileType: 'FAST',
-    physicalState: 'ON',
-    workingState: 'IDLE',
-    totalChargeCount: 12,
-    totalChargeAmount: 360
-  },
-  {
-    pileId: 'T01',
-    pileType: 'SLOW',
-    physicalState: 'ON',
-    workingState: 'CHARGING',
-    totalChargeCount: 8,
-    totalChargeAmount: 180
-  }
-])
+const piles = ref<Array<Record<string, unknown>>>([])
 
 const faultPileId = ref('F01')
 const strategyType = ref('PRIORITY')
 const reportType = ref('DAY')
-const reports = ref([{ pileId: 'F01', totalChargeCount: 12, totalFee: 520 }])
+const reports = ref<Array<Record<string, unknown>>>([])
 
-function powerOn(pileId: string) {
+onMounted(() => {
+  void loadPiles()
+  void loadReports()
+})
+
+watch(reportType, () => {
+  void loadReports()
+})
+
+async function loadPiles() {
+  const { data } = await http.get('/admin/piles')
+  piles.value = data
+}
+
+async function loadReports() {
+  const { data } = await http.get('/admin/reports', { params: { timeType: reportType.value } })
+  reports.value = data
+}
+
+async function powerOn(pileId: string) {
+  await http.post(`/admin/piles/${pileId}/power-on`)
+  await loadPiles()
   ElMessage.success(`${pileId} 已启动`)
 }
 
-function powerOff(pileId: string) {
+async function powerOff(pileId: string) {
+  await http.post(`/admin/piles/${pileId}/power-off`)
+  await loadPiles()
   ElMessage.warning(`${pileId} 已关闭`)
 }
 
-function reportFault(pileId: string) {
+async function reportFault(pileId: string) {
   faultPileId.value = pileId
+  await http.post(`/admin/piles/${pileId}/fault`)
+  await loadPiles()
   ElMessage.error(`${pileId} 故障已上报`)
 }
 
-function executeReschedule() {
+async function executeReschedule() {
+  await http.post(`/admin/piles/${faultPileId.value}/reschedule`, {
+    strategyType: strategyType.value
+  })
+  await loadPiles()
   ElMessage.success(`已执行 ${strategyType.value} 重调度`)
 }
 
-function recoverPile() {
+async function recoverPile() {
+  await http.post(`/admin/piles/${faultPileId.value}/recover`)
+  await loadPiles()
   ElMessage.success(`${faultPileId.value} 已恢复`)
 }
 </script>

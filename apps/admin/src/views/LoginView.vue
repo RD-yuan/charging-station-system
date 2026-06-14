@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { apiRequest } from '../api/http'
 
 const emit = defineEmits(['login-success'])
 
@@ -8,20 +9,26 @@ const password = ref('admin888')
 const errorMsg = ref('')
 const isLoading = ref(false)
 
-const handleLogin = (e: Event) => {
+const handleLogin = async (e: Event) => {
   e.preventDefault()
   errorMsg.value = ''
   isLoading.value = true
 
-  // Simulate call to Node/Nest backend
-  setTimeout(() => {
+  try {
+    const result = await apiRequest<{ accessToken: string; adminName: string }>('/admin/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        username: username.value.trim(),
+        password: password.value
+      })
+    })
+    localStorage.setItem('admin_access_token', result.accessToken)
+    emit('login-success', result.adminName || username.value.trim())
+  } catch {
+    errorMsg.value = '管理员用户名或密码不正确（默认：admin / admin888）'
+  } finally {
     isLoading.value = false
-    if (username.value.trim() === 'admin' && password.value === 'admin888') {
-      emit('login-success', username.value.trim())
-    } else {
-      errorMsg.value = '管理员用户名或密码不正确（默认：admin / admin888）'
-    }
-  }, 800)
+  }
 }
 </script>
 

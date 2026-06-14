@@ -1,13 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
-
 interface SidebarProps {
   currentTab: string
   adminName: string | null
 }
 
-const props = defineProps<SidebarProps>()
+defineProps<SidebarProps>()
 const emit = defineEmits(['update:currentTab', 'logout'])
 
 const menuItems = [

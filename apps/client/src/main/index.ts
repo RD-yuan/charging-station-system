@@ -9,7 +9,7 @@ function createWindow(): void {
     minHeight: 680,
     title: '智能充电桩调度计费系统',
     webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
+      preload: join(__dirname, '../preload/index.mjs'),
       sandbox: false
     }
   })
