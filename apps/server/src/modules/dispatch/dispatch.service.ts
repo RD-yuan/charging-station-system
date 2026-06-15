@@ -1,10 +1,11 @@
-import { Inject, Injectable } from '@nestjs/common'
+import { Inject, Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { ChargeMode, OrderStatus, PhysicalState, WorkingState } from '@prisma/client'
 import { virtualNowMs } from '../../common/clock'
 import { DispatchStrategyType } from '../../common/enums'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RealtimeService } from '../../realtime/realtime.service'
+import { RedisService } from '../../redis/redis.service'
 import { BillingService } from '../billing/billing.service'
 import { QueueCacheService } from '../queue/queue-cache.service'
 import { HttpSchedulerClient } from './http-scheduler.client'
@@ -44,22 +45,31 @@ interface SchedulerResponse {
 
 @Injectable()
 export class DispatchService {
+  private readonly logger = new Logger(DispatchService.name)
+
   constructor(
     @Inject(HttpSchedulerClient) private readonly schedulerClient: HttpSchedulerClient,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(QueueCacheService) private readonly queueCache: QueueCacheService,
     @Inject(RealtimeService) private readonly realtime: RealtimeService,
     @Inject(ConfigService) private readonly config: ConfigService,
-    @Inject(BillingService) private readonly billingService: BillingService
+    @Inject(BillingService) private readonly billingService: BillingService,
+    @Inject(RedisService) private readonly redis: RedisService
   ) {}
 
   async triggerBasicAll() {
-    await this.autoCompleteCharging()
-    await this.wakeIdlePiles()
-    // 依次调度快充和慢充，避免并行竞态
-    await this.triggerBasic('FAST')
-    await this.triggerBasic('SLOW')
-    return { dispatched: ['FAST', 'SLOW'] }
+    const lockKey = 'lock:dispatch:basic'
+    const locked = await this.redis.lock(lockKey, 15000)
+    if (!locked) { this.logger.warn('triggerBasicAll skipped: lock held by another process'); return { dispatched: [] } }
+    try {
+      await this.autoCompleteCharging()
+      await this.wakeIdlePiles()
+      await this.triggerBasic('FAST')
+      await this.triggerBasic('SLOW')
+      return { dispatched: ['FAST', 'SLOW'] }
+    } finally {
+      await this.redis.unlock(lockKey)
+    }
   }
 
   async triggerBasic(mode: ChargeMode | string) {
@@ -78,6 +88,10 @@ export class DispatchService {
   }
 
   async triggerFaultReschedule(pileId: string, strategyType: DispatchStrategyType) {
+    const lockKey = `lock:dispatch:fault:${pileId}`
+    const locked = await this.redis.lock(lockKey, 10000)
+    if (!locked) { this.logger.warn(`triggerFaultReschedule ${pileId} skipped: lock held`); return { assignments: [] } }
+    try {
     const pile = await this.prisma.chargingPile.findUniqueOrThrow({ where: { id: pileId } })
     const path = strategyType === DispatchStrategyType.TIME_ORDER
       ? '/dispatch/fault-time-order'
@@ -108,6 +122,9 @@ export class DispatchService {
     this.realtime.broadcast('fault_event', { pileId, strategyType, affectedCount: movableOrders.length, reassignedCount: applied.length })
     this.realtime.broadcast('dispatch_result', { strategy: strategyType, mode: pile.pileType, applied })
     return { ...response, assignments: applied }
+    } finally {
+      await this.redis.unlock(lockKey)
+    }
   }
 
   async triggerSingleOptimization(payload: { spotsCount: number; mode: ChargeMode }) {
@@ -149,6 +166,10 @@ export class DispatchService {
   }
 
   async triggerRecoveryReschedule(pileId: string) {
+    const lockKey = `lock:dispatch:recovery:${pileId}`
+    const locked = await this.redis.lock(lockKey, 10000)
+    if (!locked) { this.logger.warn(`triggerRecoveryReschedule ${pileId} skipped: lock held`); return { assignments: [] } }
+    try {
     const pile = await this.prisma.chargingPile.findUniqueOrThrow({ where: { id: pileId } })
     const sameModePileQueues = await this.pileQueues(pile.pileType, undefined, [OrderStatus.CHARGING])
     const affectedOrders = await this.assignedOrdersByMode(pile.pileType)
@@ -164,6 +185,9 @@ export class DispatchService {
     )
     this.realtime.broadcast('dispatch_result', { strategy: 'RECOVERY_TIME_ORDER', mode: pile.pileType, applied })
     return { ...response, assignments: applied }
+    } finally {
+      await this.redis.unlock(lockKey)
+    }
   }
 
   private async safeSchedule(path: string, payload: unknown, fallback: () => SchedulerAssignment[]): Promise<SchedulerResponse> {
@@ -321,6 +345,11 @@ export class DispatchService {
       const order = pile.orders[0]
       if (!order) continue
 
+      // 防并发：获取每根桩的唤醒锁
+      const pileLockKey = `lock:pile:${pile.id}:wake`
+      const pileLocked = await this.redis.lock(pileLockKey, 5000)
+      if (!pileLocked) continue
+
       const vNow = new Date(virtualNowMs())
       try {
         await this.prisma.$transaction(async (tx) => {
@@ -339,6 +368,8 @@ export class DispatchService {
         await this.queueCache.refreshPile(pile.id)
       } catch {
         // 启动失败不阻塞
+      } finally {
+        await this.redis.unlock(pileLockKey)
       }
     }
   }
