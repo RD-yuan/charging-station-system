@@ -15,14 +15,14 @@
 主要目录：
 
 ```text
-apps/client/src/renderer/src/views/UserDashboard.vue
-apps/client/src/renderer/src/api/
-apps/client/src/renderer/src/stores/
+apps/client/src/views/AuthView.vue
+apps/client/src/views/user/UserDashboard.vue
+apps/client/src/api/http.ts
 ```
 
-## 前端 B：管理员客户端与 Electron 负责人
+## 前端 B：管理员客户端负责人
 
-负责管理员端页面和桌面端打包：
+负责管理员端页面：
 
 - 管理员登录。
 - 查看充电桩状态。
@@ -32,15 +32,17 @@ apps/client/src/renderer/src/stores/
 - 故障重调度。
 - 故障恢复。
 - 报表展示。
-- Electron 窗口和打包配置。
+- WebSocket 实时协同。
 
 主要目录：
 
 ```text
-apps/client/src/main/
-apps/client/src/preload/
-apps/client/src/renderer/src/views/AdminDashboard.vue
-apps/client/src/renderer/src/views/DispatchDashboard.vue
+apps/client/src/views/AdminLayout.vue
+apps/client/src/views/DashboardView.vue
+apps/client/src/views/MonitorView.vue
+apps/client/src/views/ReportView.vue
+apps/client/src/views/WebSocketView.vue
+apps/client/src/api/http.ts
 ```
 
 ## 后端 A：组长，架构与集成负责人

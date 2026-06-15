@@ -1,40 +1,47 @@
-import { Body, Controller, Param, Post } from '@nestjs/common'
+import { Body, Controller, Inject, Param, Post } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
+import { ChargeMode } from '@prisma/client'
+import { DispatchStrategyType } from '../../common/enums'
 import { DispatchService } from './dispatch.service'
-import {
-  BatchOptimizationDto,
-  DispatchBasicDto,
-  FaultDispatchDto,
-  SingleOptimizationDto
-} from './dto/dispatch.dto'
 
 @ApiTags('dispatch')
 @Controller('dispatch')
 export class DispatchController {
-  constructor(private readonly dispatchService: DispatchService) {}
+  constructor(@Inject(DispatchService) private readonly dispatchService: DispatchService) {}
 
-  @Post('basic')
-  basic(@Body() dto: DispatchBasicDto) {
-    return this.dispatchService.triggerBasic(dto.mode)
+  @Post('basic/:mode')
+  basic(@Param('mode') mode: ChargeMode) {
+    return this.dispatchService.triggerBasic(mode)
   }
 
   @Post('fault/:pileId')
-  fault(@Param('pileId') pileId: string, @Body() dto: FaultDispatchDto) {
-    return this.dispatchService.triggerFaultReschedule(pileId, dto.strategyType)
-  }
-
-  @Post('recovery-time-order')
-  recovery() {
-    return this.dispatchService.triggerRecoveryTimeOrder()
+  fault(@Param('pileId') pileId: string, @Body('strategyType') strategyType: DispatchStrategyType) {
+    return this.dispatchService.triggerFaultReschedule(pileId, strategyType)
   }
 
   @Post('single-optimization')
-  single(@Body() dto: SingleOptimizationDto) {
-    return this.dispatchService.triggerSingleOptimization(dto)
+  single(@Body() body: { spotsCount: number; mode: ChargeMode }) {
+    return this.dispatchService.triggerSingleOptimization(body)
   }
 
   @Post('batch-optimization')
-  batch(@Body() dto: BatchOptimizationDto) {
-    return this.dispatchService.triggerBatchOptimization(dto)
+  batch(@Body() body: { spotsCount: number }) {
+    return this.dispatchService.triggerBatchOptimization(body)
+  }
+}
+
+@ApiTags('admin optimization')
+@Controller('admin/optimization')
+export class AdminOptimizationController {
+  constructor(@Inject(DispatchService) private readonly dispatchService: DispatchService) {}
+
+  @Post('single')
+  single(@Body() body: { spotsCount: number; mode: ChargeMode }) {
+    return this.dispatchService.triggerSingleOptimization(body)
+  }
+
+  @Post('batch')
+  batch(@Body() body: { spotsCount: number }) {
+    return this.dispatchService.triggerBatchOptimization(body)
   }
 }

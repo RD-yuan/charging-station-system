@@ -41,4 +41,22 @@ export class AuthService {
       role: user.role
     }
   }
+
+  async adminLogin(dto: LoginDto) {
+    const user = await this.prisma.user.findUnique({ where: { username: dto.username } })
+    if (!user || user.role !== 'ADMIN') {
+      throw new UnauthorizedException('Invalid admin credentials.')
+    }
+    const valid = await bcrypt.compare(dto.password, user.passwordHash)
+    if (!valid) {
+      throw new UnauthorizedException('Invalid admin credentials.')
+    }
+    const payload = { userId: user.id, username: user.username, role: user.role }
+    return {
+      accessToken: this.jwtService.sign(payload),
+      userId: user.id,
+      username: user.username,
+      role: user.role
+    }
+  }
 }

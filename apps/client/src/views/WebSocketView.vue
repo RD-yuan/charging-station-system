@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch } from 'vue'
 
 interface LogEntry {
   id: string
@@ -8,7 +8,7 @@ interface LogEntry {
   timestamp: string
 }
 
-const props = defineProps<{
+defineProps<{
   socketLogs: Array<LogEntry>
 }>()
 
@@ -44,7 +44,7 @@ const handleSend = () => {
   let payload = {}
   try {
     payload = JSON.parse(customMsg.value)
-  } catch (err) {
+  } catch {
     alert('JSON 格式不正确，请修复后再发送仿真广播！')
     return
   }

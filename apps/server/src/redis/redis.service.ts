@@ -47,6 +47,15 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async setJson(key: string, value: unknown, ttlSeconds?: number): Promise<void> {
+    await this.set(key, JSON.stringify(value), ttlSeconds)
+  }
+
+  async getJson<T>(key: string): Promise<T | null> {
+    const raw = await this.get(key)
+    return raw ? (JSON.parse(raw) as T) : null
+  }
+
   async del(key: string): Promise<void> {
     await this.client.del(key)
   }

@@ -1,7 +1,11 @@
 import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator'
-import { ChargeMode } from '../../common/enums'
+import { ChargeMode } from '@prisma/client'
 
 export class SubmitChargingRequestDto {
+  @IsString()
+  @IsOptional()
+  userId?: string
+
   @IsEnum(ChargeMode)
   chargeMode!: ChargeMode
 

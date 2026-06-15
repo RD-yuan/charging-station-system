@@ -1,5 +1,37 @@
 from app.schemas import CarOrder, ChargeMode, PileQueueState
-from app.strategies import batch_optimization_dispatch, fault_time_order_dispatch
+from app.strategies import basic_shortest_dispatch, batch_optimization_dispatch, fault_priority_dispatch, fault_time_order_dispatch
+
+
+def test_basic_dispatch_chooses_shortest_projected_finish_time():
+    orders = [
+        CarOrder(order_id="o1", queue_no="F1", charge_mode=ChargeMode.FAST, requested_amount=30),
+    ]
+    piles = [
+        PileQueueState(
+            pile_id="F01",
+            pile_type=ChargeMode.FAST,
+            power=30,
+            queued_orders=[CarOrder(order_id="old", queue_no="F0", charge_mode=ChargeMode.FAST, requested_amount=60)],
+        ),
+        PileQueueState(pile_id="F02", pile_type=ChargeMode.FAST, power=30),
+    ]
+
+    result = basic_shortest_dispatch(orders, piles)
+
+    assert result[0].pile_id == "F02"
+
+
+def test_fault_priority_dispatch_only_uses_affected_orders():
+    affected = [
+        CarOrder(order_id="faulted", queue_no="F3", charge_mode=ChargeMode.FAST, requested_amount=10),
+    ]
+    piles = [
+        PileQueueState(pile_id="F01", pile_type=ChargeMode.FAST, power=30),
+    ]
+
+    result = fault_priority_dispatch(affected, piles)
+
+    assert [item.order_id for item in result] == ["faulted"]
 
 
 def test_fault_time_order_keeps_original_queue_numbers():

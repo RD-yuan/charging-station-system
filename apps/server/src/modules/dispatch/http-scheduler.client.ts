@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Inject, Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import axios from 'axios'
 
@@ -6,7 +6,7 @@ import axios from 'axios'
 export class HttpSchedulerClient {
   private readonly baseUrl: string
 
-  constructor(config: ConfigService) {
+  constructor(@Inject(ConfigService) config: ConfigService) {
     this.baseUrl = config.get<string>('SCHEDULER_SERVICE_URL') ?? 'http://localhost:8100'
   }
 

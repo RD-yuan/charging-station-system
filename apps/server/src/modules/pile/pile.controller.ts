@@ -1,17 +1,12 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common'
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
-import { Roles } from '../../common/decorators/roles.decorator'
-import { RolesGuard } from '../auth/guards/roles.guard'
+import { Body, Controller, Get, Inject, Param, Post } from '@nestjs/common'
+import { ApiTags } from '@nestjs/swagger'
+import { DispatchStrategyType } from '../../common/enums'
 import { PileService } from './pile.service'
-import { RescheduleDto } from './dto/pile.dto'
 
 @ApiTags('piles')
-@ApiBearerAuth()
 @Controller('admin/piles')
-@UseGuards(RolesGuard)
-@Roles('ADMIN')
 export class PileController {
-  constructor(private readonly pileService: PileService) {}
+  constructor(@Inject(PileService) private readonly pileService: PileService) {}
 
   @Get()
   list() {
@@ -39,12 +34,21 @@ export class PileController {
   }
 
   @Post(':pileId/reschedule')
-  reschedule(@Param('pileId') pileId: string, @Body() dto: RescheduleDto) {
-    return this.pileService.reschedule(pileId, dto.strategyType)
+  reschedule(@Param('pileId') pileId: string, @Body('strategyType') strategyType: DispatchStrategyType) {
+    return this.pileService.reschedule(pileId, normalizeStrategy(strategyType))
   }
 
   @Post(':pileId/recover')
   recover(@Param('pileId') pileId: string) {
     return this.pileService.recover(pileId)
   }
+
+  @Post(':pileId/control')
+  control(@Param('pileId') pileId: string, @Body() body: { action: string; targetState?: string }) {
+    return this.pileService.control(pileId, body.action, body.targetState)
+  }
+}
+
+function normalizeStrategy(strategyType: DispatchStrategyType | string) {
+  return strategyType === 'PRIORITY_QUEUE' ? DispatchStrategyType.PRIORITY : strategyType as DispatchStrategyType
 }

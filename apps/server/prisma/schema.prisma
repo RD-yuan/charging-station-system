@@ -37,6 +37,18 @@ enum UserRole {
   ADMIN
 }
 
+enum SessionStatus {
+  ACTIVE
+  CLOSED
+  ABORTED
+}
+
+enum BillingPeriod {
+  PEAK
+  FLAT
+  VALLEY
+}
+
 model User {
   id              String          @id @default(cuid())
   username        String          @unique
@@ -70,8 +82,9 @@ model ChargingOrder {
   requestedAmount Float
   queueNo         String
   status          OrderStatus        @default(WAITING)
-  assignedPileId  String?
-  submitTime      DateTime           @default(now())
+  assignedPileId       String?
+  pileQueueEnteredAt   DateTime?
+  submitTime           DateTime           @default(now())
   startedAt       DateTime?
   finishedAt      DateTime?
   user            User               @relation(fields: [userId], references: [id])
@@ -87,28 +100,44 @@ model ChargingOrder {
 }
 
 model ChargingSession {
-  id           String         @id @default(cuid())
-  orderId      String
-  pileId       String
-  startTime    DateTime      @default(now())
-  stopTime     DateTime?
-  actualAmount Float?
-  stopReason   String?
-  order        ChargingOrder @relation(fields: [orderId], references: [id])
-  pile         ChargingPile  @relation(fields: [pileId], references: [id])
-  detail       BillingDetail?
+  id            String         @id @default(cuid())
+  orderId       String
+  pileId        String
+  startTime     DateTime      @default(now())
+  stopTime      DateTime?
+  actualAmount  Float?
+  stopReason    String?
+  sessionStatus SessionStatus  @default(ACTIVE)
+  order         ChargingOrder @relation(fields: [orderId], references: [id])
+  pile          ChargingPile  @relation(fields: [pileId], references: [id])
+  detail        BillingDetail?
 }
 
 model BillingDetail {
-  id           String          @id @default(cuid())
-  orderId      String          @unique
-  sessionId    String          @unique
-  generatedAt  DateTime        @default(now())
-  actualAmount Float
-  duration     Float
-  chargeFee    Float
-  serviceFee   Float
-  totalFee     Float
-  order        ChargingOrder   @relation(fields: [orderId], references: [id])
-  session      ChargingSession @relation(fields: [sessionId], references: [id])
+  id                String          @id @default(cuid())
+  orderId           String          @unique
+  sessionId         String          @unique
+  generatedAt       DateTime        @default(now())
+  actualAmount      Float
+  duration          Float
+  chargeFee         Float
+  serviceFee        Float
+  totalFee          Float
+  billingRuleVersion Int            @default(1)
+  order             ChargingOrder   @relation(fields: [orderId], references: [id])
+  session           ChargingSession @relation(fields: [sessionId], references: [id])
+}
+
+model BillingRule {
+  id             String        @id @default(cuid())
+  period         BillingPeriod
+  startMinute    Int
+  endMinute      Int
+  price          Float
+  serviceFeeRate Float         @default(0.8)
+  version        Int
+  active         Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+
+  @@index([active, version])
 }

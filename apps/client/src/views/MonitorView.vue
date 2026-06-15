@@ -19,7 +19,7 @@ interface Pile {
   queue: Array<QueueCar>
 }
 
-const props = defineProps<{
+defineProps<{
   piles: Array<Pile>
 }>()
 
@@ -71,6 +71,7 @@ const handleReschedule = (pileId: string) => {
         v-for="pile in piles" 
         :key="pile.id"
         :id="`pile-card-${pile.id}`"
+        @click="selectPile(pile.id)"
         :class="`bg-white rounded-xl border transition-all duration-300 overflow-hidden ${
           pile.workingState === 'FAULT'
             ? 'border-rose-300 shadow-rose-100/50 shadow-md'
