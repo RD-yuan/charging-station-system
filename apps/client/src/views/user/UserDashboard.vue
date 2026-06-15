@@ -283,6 +283,14 @@ const statusColor: Record<OrderStatus, string> = {
       <div>
         <h2 class="text-2xl font-bold text-slate-900 tracking-tight">充电服务中心</h2>
         <p class="text-sm text-slate-500 mt-1">欢迎回来，<span class="font-mono text-emerald-600">{{ username }}</span></p>
+        <div class="flex gap-3 mt-2">
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-amber-100 text-amber-700 border border-amber-200">
+            快充 30 kW/h
+          </span>
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-blue-100 text-blue-700 border border-blue-200">
+            慢充 10 kW/h
+          </span>
+        </div>
       </div>
       <div
         v-if="toast"

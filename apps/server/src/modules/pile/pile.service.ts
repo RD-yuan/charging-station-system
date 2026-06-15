@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common'
-import { ChargeMode, OrderStatus, PhysicalState, WorkingState } from '@prisma/client'
+import { OrderStatus, PhysicalState, WorkingState } from '@prisma/client'
 import { chargingProgress, deliveredAmount } from '../../common/charging'
 import { virtualNowMs } from '../../common/clock'
 import { DispatchStrategyType } from '../../common/enums'
@@ -149,13 +149,18 @@ export class PileService {
       const detailRecord = await this.prisma.billingDetail.findUnique({ where: { orderId: active.id } })
       const remaining = Math.round((active.requestedAmount - (detailRecord?.actualAmount ?? 0)) * 100) / 100
       if (remaining > 0) {
-        const queueNo = await this.nextRescheduleQueueNo(active.chargeMode)
+        // 将原订单排队号改为 -A 后缀，续充订单继承原号
+        const originalQueueNo = active.queueNo
+        await this.prisma.chargingOrder.update({
+          where: { id: active.id },
+          data: { queueNo: `${originalQueueNo}-A` }
+        })
         const continuation = await this.prisma.chargingOrder.create({
           data: {
             userId: active.userId,
             chargeMode: active.chargeMode,
             requestedAmount: remaining,
-            queueNo,
+            queueNo: originalQueueNo,
             status: OrderStatus.WAITING
           }
         })
@@ -218,19 +223,6 @@ export class PileService {
       await this.dispatchService.triggerBasic(pile.pileType)
     }
     return pile
-  }
-
-  private async nextRescheduleQueueNo(mode: ChargeMode) {
-    const prefix = mode === 'FAST' ? 'F' : 'T'
-    const existing = await this.prisma.chargingOrder.findMany({
-      where: { chargeMode: mode, queueNo: { startsWith: prefix } },
-      select: { queueNo: true }
-    })
-    const max = existing.reduce((current, item) => {
-      const number = Number(item.queueNo.replace(/\D/g, ''))
-      return Number.isFinite(number) ? Math.max(current, number) : current
-    }, 0)
-    return `${prefix}${max + 1}`
   }
 
   async control(pileId: string, action: string, targetState?: string) {

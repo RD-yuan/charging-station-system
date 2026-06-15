@@ -13,6 +13,11 @@ import { DispatchService } from './dispatch.service'
 export class DispatchController {
   constructor(@Inject(DispatchService) private readonly dispatchService: DispatchService) {}
 
+  @Post('basic')
+  basicAll() {
+    return this.dispatchService.triggerBasicAll()
+  }
+
   @Post('basic/:mode')
   basic(@Param('mode') mode: ChargeMode) {
     return this.dispatchService.triggerBasic(mode)

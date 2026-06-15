@@ -34,7 +34,8 @@ const emit = defineEmits([
   'recover-pile',
   'trigger-reschedule',
   'single-optimization',
-  'batch-optimization'
+  'batch-optimization',
+  'basic-dispatch'
 ])
 
 const singleMode = ref<'FAST' | 'SLOW'>('FAST')
@@ -84,8 +85,19 @@ const progressWidth = (progress: number) => `${Math.min(100, Math.max(0, progres
 
     <!-- 最优时长调度面板 -->
     <div class="bg-white border border-slate-200 rounded-xl p-5">
-      <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wider mb-4">最优时长调度</h3>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wider mb-4">调度控制</h3>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <!-- 基础调度 -->
+        <div class="bg-slate-50 rounded-lg p-4 border border-slate-100">
+          <p class="text-[11px] font-bold text-slate-700 mb-3">基础调度（快充+慢充）</p>
+          <p class="text-[10px] text-slate-400 mb-3">按到达顺序将等候区车辆分配至预计完成时间最短的同模式桩</p>
+          <button
+            @click="emit('basic-dispatch')"
+            class="w-full py-2 rounded-lg text-[10px] font-bold bg-slate-700 text-white hover:bg-slate-600 transition-all"
+          >
+            触发基础调度
+          </button>
+        </div>
         <!-- 单次最优 -->
         <div class="bg-slate-50 rounded-lg p-4 border border-slate-100">
           <p class="text-[11px] font-bold text-slate-700 mb-3">单次最优调度（按模式）</p>

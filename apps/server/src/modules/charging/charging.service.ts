@@ -43,7 +43,6 @@ export class ChargingService {
           }
         })
         await this.queueCache.refreshMode(dto.chargeMode)
-        await this.dispatchService.triggerBasic(dto.chargeMode)
         return this.queueStatus(order.id)
       } catch (err) {
         // unique 冲突时重试，其他错误直接抛出
@@ -66,7 +65,6 @@ export class ChargingService {
     })
     await this.queueCache.refreshMode(order.chargeMode)
     await this.queueCache.refreshMode(dto.newMode)
-    await this.dispatchService.triggerBasic(dto.newMode)
     return this.queueStatus(updated.id)
   }
 
@@ -78,7 +76,6 @@ export class ChargingService {
       data: { requestedAmount: dto.newAmount }
     })
     await this.queueCache.refreshMode(updated.chargeMode)
-    await this.dispatchService.triggerBasic(updated.chargeMode)
     return this.queueStatus(updated.id)
   }
 

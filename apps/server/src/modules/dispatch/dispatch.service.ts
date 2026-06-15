@@ -53,6 +53,14 @@ export class DispatchService {
     @Inject(BillingService) private readonly billingService: BillingService
   ) {}
 
+  async triggerBasicAll() {
+    await this.autoCompleteCharging()
+    // 依次调度快充和慢充，避免并行竞态
+    await this.triggerBasic('FAST')
+    await this.triggerBasic('SLOW')
+    return { dispatched: ['FAST', 'SLOW'] }
+  }
+
   async triggerBasic(mode: ChargeMode | string) {
     // 先自动结束所有已充满的订单，释放桩位
     await this.autoCompleteCharging()

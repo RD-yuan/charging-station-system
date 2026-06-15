@@ -166,10 +166,6 @@ function connectSocket() {
         void loadReports()
       }
       if (['pile_metrics_update', 'dispatch_result', 'charging_started'].includes(message.event)) {
-        if (message.event === 'dispatch_result') {
-          affectedOrderIds.value = new Set()
-          faultedPileId.value = null
-        }
         void loadPiles()
         void loadWaitingQueue()
         void loadReports()
@@ -198,6 +194,8 @@ async function handleReportFault(pileId: string) {
 async function handleRecoverPile(pileId: string) {
   await apiRequest(`/admin/piles/${pileId}/recover`, { method: 'POST', body: '{}' })
   addSocketLog('OUTGOING', `管理员恢复故障充电桩：${pileId}`)
+  affectedOrderIds.value = new Set()
+  faultedPileId.value = null
   await loadPiles()
 }
 
@@ -213,6 +211,12 @@ async function handleTriggerReschedule({ pileId, strategy }: { pileId: string; s
 async function handleReportTimeTypeChange(timeType: ReportTimeType) {
   reportTimeType.value = timeType
   await loadReports()
+}
+
+async function handleBasicDispatch() {
+  await apiRequest('/dispatch/basic', { method: 'POST', body: '{}' })
+  addSocketLog('OUTGOING', '基础调度: FAST + SLOW')
+  await loadAdminData()
 }
 
 async function handleSingleOptimization({ spotsCount, mode }: { spotsCount: number; mode: string }) {
@@ -314,6 +318,7 @@ async function setClockSpeedAction(speed: number) {
           @report-fault="handleReportFault"
           @recover-pile="handleRecoverPile"
           @trigger-reschedule="handleTriggerReschedule"
+          @basic-dispatch="handleBasicDispatch"
           @single-optimization="handleSingleOptimization"
           @batch-optimization="handleBatchOptimization"
         />
