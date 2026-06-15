@@ -1,7 +1,7 @@
 import 'reflect-metadata'
 import { ValidationPipe } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { NestFactory, Reflector } from '@nestjs/core'
+import { NestFactory } from '@nestjs/core'
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 import { AppModule } from './app.module'
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter'
@@ -20,7 +20,7 @@ async function bootstrap() {
     })
   )
   app.useGlobalFilters(new AllExceptionsFilter())
-  app.useGlobalGuards(new JwtAuthGuard(app.get(Reflector)))
+  app.useGlobalGuards(app.get(JwtAuthGuard))
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('智能充电桩调度计费系统 API')

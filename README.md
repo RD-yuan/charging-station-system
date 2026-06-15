@@ -1,14 +1,11 @@
 # 智能充电桩调度计费系统
 
-这是一个用于课程项目的基础工程框架，采用 Vue3 / Electron 前端、Node.js / TypeScript 后端、MySQL、Redis 和 Python 调度算法服务。
+这是一个用于课程项目的基础工程框架，采用 Vue3 Web 前端、Node.js / TypeScript 后端、MySQL、Redis 和 Python 调度算法服务。
 
 ## 架构
 
 ```text
-用户客户端                    管理员客户端
-Web / Electron               Web / Electron
-     ↓                            ↓
-     └────────── 前端页面 Vue3 ──────────┘
+用户端 / 管理端（统一 Vue3 Web 前端 apps/client）
                          ↓
                  HTTP API / WebSocket
                          ↓
@@ -26,7 +23,7 @@ Web / Electron               Web / Electron
 ```text
 charging-station-system/
   apps/
-    client/              Electron + Vue3 前端
+    client/              Vue3 Web 前端（用户端 + 管理端）
     server/              NestJS + TypeScript 后端
   services/
     scheduler/           Python FastAPI 调度算法服务
@@ -74,7 +71,7 @@ npm run dev
 
 默认地址：
 
-- Electron / Vue3 前端：由 electron-vite 自动打开
+- Vue3 前端：http://localhost:5173
 - Node.js 后端 API：http://localhost:3000/api
 - Swagger 文档：http://localhost:3000/docs
 - Python 调度服务：http://localhost:8100/docs
@@ -121,17 +118,32 @@ workingState: IDLE / CHARGING / FAULT
 
 详见 [docs/team-division.md](docs/team-division.md)。
 
+## 演示账号
+
+执行 `npm --workspace apps/server run prisma:seed` 后可用：
+
+| 入口 | 用户名 | 密码 |
+|------|--------|------|
+| 管理端 `/auth?mode=admin` | `admin` | `admin123` |
+| 用户端 `/auth?mode=user` | `user_01` | `user123` |
+
+管理端不提供自助注册；用户端支持注册新账号。
+
+## 相对 PR #1（JWT 鉴权合并）的本地修复
+
+详见 [docs/backend-a-report.md §8](docs/backend-a-report.md#8-2026-06-15-本地修复相对-pr-1--41850d6)，摘要如下：
+
+- **后端**：补全 `/user/login`、`/admin/login` 等路由注册；公开端点加 `@Public()`；修复 `tsx` 下 `@Inject` 依赖注入；seed 增加演示用户 `user_01`。
+- **前端**：登录页默认账号与 seed 对齐；用户端登录/注册分 Tab；注册后自动登录拿 token；管理端响应对齐 `username` 字段。
+
 ## 当前框架状态
 
-当前版本是项目骨架，已经包含：
+当前版本已包含：
 
-- Vue3 / Electron 页面框架
-- 用户端基础页面
-- 管理员端基础页面
-- 调度算法面板
-- NestJS 模块结构
+- 统一 Vue3 Web 前端（用户端 + 管理端，`apps/client`）
+- NestJS 模块结构 + JWT 鉴权
 - Prisma 数据库 schema
 - Python FastAPI 调度服务
-- 调度算法测试样例
+- Redis 队列缓存基础
 
-下一步应优先完成真实数据库落库、Redis 队列缓存、WebSocket 推送和前后端接口联调。
+下一步应优先完成充电桩 seed 数据、WebSocket 推送联调和报表接口完善。

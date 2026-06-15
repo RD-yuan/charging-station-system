@@ -9,27 +9,39 @@ const route = useRoute()
 const router = useRouter()
 
 const mode = ref<PortalMode>(route.query.mode === 'admin' ? 'admin' : 'user')
+const userAuthTab = ref<'login' | 'register'>('login')
 const username = ref(mode.value === 'admin' ? 'admin' : 'user_01')
-const password = ref(mode.value === 'admin' ? 'admin888' : 'password123')
+const password = ref(mode.value === 'admin' ? 'admin123' : 'user123')
 const batteryCapacity = ref(60)
 const errorMsg = ref('')
 const successMsg = ref('')
 const isLoading = ref(false)
 
 const isUserMode = computed(() => mode.value === 'user')
+const isRegisterTab = computed(() => isUserMode.value && userAuthTab.value === 'register')
 
 watch(
   () => route.query.mode,
   (value) => {
     mode.value = value === 'admin' ? 'admin' : 'user'
+    if (mode.value === 'user') userAuthTab.value = 'login'
   }
 )
 
 function switchMode(next: PortalMode) {
   mode.value = next
+  userAuthTab.value = 'login'
+  username.value = next === 'admin' ? 'admin' : 'user_01'
+  password.value = next === 'admin' ? 'admin123' : 'user123'
   errorMsg.value = ''
   successMsg.value = ''
   router.replace({ path: '/auth', query: { mode: next } })
+}
+
+function saveUserSession(result: { accessToken: string; userId: string; username: string }) {
+  localStorage.setItem('access_token', result.accessToken)
+  localStorage.setItem('user_id', result.userId)
+  localStorage.setItem('username', result.username)
 }
 
 async function handleLogin(e: Event) {
@@ -51,27 +63,28 @@ async function handleLogin(e: Event) {
         },
         'user'
       )
-      localStorage.setItem('access_token', result.accessToken)
-      localStorage.setItem('user_id', result.userId)
-      localStorage.setItem('username', result.username)
+      saveUserSession(result)
       await router.push('/user')
       return
     }
 
-    const result = await apiRequest<{ accessToken: string; adminName: string }>('/admin/login', {
-      method: 'POST',
-      body: JSON.stringify({
-        username: username.value.trim(),
-        password: password.value
-      })
-    })
+    const result = await apiRequest<{ accessToken: string; userId: string; username: string }>(
+      '/admin/login',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          username: username.value.trim(),
+          password: password.value
+        })
+      }
+    )
     localStorage.setItem('admin_access_token', result.accessToken)
-    localStorage.setItem('admin_name', result.adminName || username.value.trim())
+    localStorage.setItem('admin_name', result.username)
     await router.push('/admin')
   } catch {
     errorMsg.value = isUserMode.value
-      ? '用户登录失败，请检查用户名和密码'
-      : '管理员用户名或密码不正确（默认：admin / admin888）'
+      ? '用户登录失败，请检查用户名和密码（演示：user_01 / user123）'
+      : '管理员登录失败（演示：admin / admin123）'
   } finally {
     isLoading.value = false
   }
@@ -81,10 +94,16 @@ async function handleRegister(e: Event) {
   e.preventDefault()
   errorMsg.value = ''
   successMsg.value = ''
+
+  if (batteryCapacity.value < 1) {
+    errorMsg.value = '电池容量至少为 1 kWh'
+    return
+  }
+
   isLoading.value = true
 
   try {
-    const result = await apiRequest<{ accessToken: string; userId: string; username: string }>(
+    await apiRequest<{ userId: string; username: string; role: string }>(
       '/user/register',
       {
         method: 'POST',
@@ -96,15 +115,32 @@ async function handleRegister(e: Event) {
       },
       'user'
     )
-    localStorage.setItem('access_token', result.accessToken)
-    localStorage.setItem('user_id', result.userId)
-    localStorage.setItem('username', result.username)
+    const loginResult = await apiRequest<{ accessToken: string; userId: string; username: string }>(
+      '/user/login',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          username: username.value.trim(),
+          password: password.value
+        })
+      },
+      'user'
+    )
+    saveUserSession(loginResult)
     successMsg.value = '注册成功，正在进入用户端...'
     setTimeout(() => void router.push('/user'), 600)
   } catch {
     errorMsg.value = '注册失败，用户名可能已存在'
   } finally {
     isLoading.value = false
+  }
+}
+
+function handleFormSubmit(e: Event) {
+  if (isRegisterTab.value) {
+    void handleRegister(e)
+  } else {
+    void handleLogin(e)
   }
 }
 </script>
@@ -150,7 +186,26 @@ async function handleRegister(e: Event) {
           </p>
         </div>
 
-        <form class="space-y-5" @submit="handleLogin">
+        <div v-if="isUserMode" class="flex p-1 mb-5 bg-slate-950/60 border border-slate-800 rounded-lg">
+          <button
+            type="button"
+            class="flex-1 py-2 text-xs font-bold rounded-md transition-all"
+            :class="userAuthTab === 'login' ? 'bg-slate-800 text-emerald-400' : 'text-slate-500 hover:text-slate-300'"
+            @click="userAuthTab = 'login'"
+          >
+            登录
+          </button>
+          <button
+            type="button"
+            class="flex-1 py-2 text-xs font-bold rounded-md transition-all"
+            :class="userAuthTab === 'register' ? 'bg-slate-800 text-emerald-400' : 'text-slate-500 hover:text-slate-300'"
+            @click="userAuthTab = 'register'"
+          >
+            注册
+          </button>
+        </div>
+
+        <form class="space-y-5" novalidate @submit.prevent="handleFormSubmit">
           <div>
             <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">用户名</label>
             <input
@@ -173,16 +228,17 @@ async function handleRegister(e: Event) {
             />
           </div>
 
-          <div v-if="isUserMode">
+          <div v-if="isRegisterTab">
             <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">电池容量 (kWh)</label>
             <input
               v-model.number="batteryCapacity"
               type="number"
               min="1"
-              step="5"
+              step="1"
+              required
               class="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500/80 rounded-xl py-3 px-4 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all font-mono"
             />
-            <p class="text-[10px] text-slate-500 mt-1.5">注册时使用，登录可忽略</p>
+            <p class="text-[10px] text-slate-500 mt-1.5">仅注册时需要填写</p>
           </div>
 
           <div v-if="errorMsg" class="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-400">
@@ -194,6 +250,7 @@ async function handleRegister(e: Event) {
 
           <div class="flex gap-3 pt-1">
             <button
+              v-if="!isRegisterTab"
               type="submit"
               :disabled="isLoading"
               class="flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold py-3.5 px-4 rounded-xl text-xs tracking-wider uppercase shadow-lg shadow-emerald-500/15 transition-all"
@@ -201,23 +258,23 @@ async function handleRegister(e: Event) {
               {{ isLoading ? '处理中...' : isUserMode ? '登录' : '进入管理面板' }}
             </button>
             <button
-              v-if="isUserMode"
-              type="button"
+              v-else
+              type="submit"
               :disabled="isLoading"
-              class="flex-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-100 font-bold py-3.5 px-4 rounded-xl text-xs tracking-wider uppercase border border-slate-700 transition-all"
-              @click="handleRegister"
+              class="flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold py-3.5 px-4 rounded-xl text-xs tracking-wider uppercase shadow-lg shadow-emerald-500/15 transition-all"
             >
-              注册
+              {{ isLoading ? '处理中...' : '注册并进入' }}
             </button>
           </div>
         </form>
 
         <div class="mt-8 pt-6 border-t border-slate-800/80 text-[11px] text-slate-500 leading-relaxed space-y-2">
-          <p v-if="isUserMode">用户端：支持注册与登录，可提交充电请求、查询排队、开始/结束充电。</p>
-          <template v-else>
-            <p>管理端<strong class="text-slate-400">不提供自助注册</strong>，管理员账号由系统预置（数据库 seed）。</p>
-            <p>演示账户：<strong class="text-slate-400">admin</strong> / <strong class="text-slate-400">admin888</strong></p>
-          </template>
+          <p v-if="isUserMode">
+            演示账户：<strong class="text-slate-400">user_01</strong> / <strong class="text-slate-400">user123</strong>，也可自行注册新用户。
+          </p>
+          <p v-else>
+            管理端演示账户：<strong class="text-slate-400">admin</strong> / <strong class="text-slate-400">admin123</strong>（seed 预置，不可注册）。
+          </p>
           <p class="text-slate-600">统一入口，可在上方按钮切换用户端与管理端。</p>
         </div>
       </div>

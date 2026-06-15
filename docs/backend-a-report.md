@@ -193,3 +193,40 @@ src/modules/dispatch/dto/
 src/modules/pile/dto/
   pile.dto.ts                    # RescheduleDto
 ```
+
+---
+
+## 8. 2026-06-15 本地修复（相对 PR #1 / `41850d6`）
+
+> 以下改动已在 main 分支推送，解决合并前端 + JWT 鉴权后**无法登录、接口 404/401** 等问题。
+
+### 后端
+
+| 问题 | 修复 |
+|------|------|
+| `POST /api/user/login`、`/api/user/register`、`/api/admin/login` 返回 404 | `AuthModule` 注册 `UserAuthAliasController`、`AdminAuthController`、`AdminAuthAliasController`（此前仅注册了 `/api/auth/*`） |
+| 登录/注册被全局 JWT 守卫拦截 | 上述公开端点加 `@Public()` |
+| `tsx` 运行时 Nest 依赖注入失败（`undefined` 注入） | `AuthService`、`JwtStrategy`、`JwtAuthGuard`、`RolesGuard`、`RedisService`、`main.ts` 等补 `@Inject()` |
+| Redis 模块读不到配置 | `RedisModule` 导入 `ConfigModule` |
+| seed 仅有 admin，无演示用户 | 新增 `user_01` / `user123`（USER 角色，60 kWh） |
+
+### 前端（`apps/client/src/views/AuthView.vue`）
+
+| 问题 | 修复 |
+|------|------|
+| 默认密码与 seed 不一致（`admin888`） | 改为 `admin` / `admin123`、`user_01` / `user123` |
+| 管理端登录读 `adminName`，后端返回 `username` | 对齐响应字段 |
+| 用户端登录页仍显示电池容量，`step=5` 导致 60 非法 | 登录/注册分 Tab；容量仅注册时填写，`step=1` |
+| 注册接口不返回 `accessToken` | 注册成功后自动再调 `/user/login` 拿 token |
+
+### 演示账号（与 seed 一致）
+
+| 入口 | 用户名 | 密码 |
+|------|--------|------|
+| 管理端 | `admin` | `admin123` |
+| 用户端 | `user_01` | `user123` |
+
+### 已知未改项
+
+- **电桩监控页空白**：当前 seed **不创建** `ChargingPile` 记录，需另行初始化桩数据或扩展 seed。
+- 数据库迁移文件表名大小写不一致时，建议用 `prisma db push` + `prisma:seed`，慎用 `prisma migrate dev`。

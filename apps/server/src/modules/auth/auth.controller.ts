@@ -27,11 +27,13 @@ export class AuthController {
 export class UserAuthAliasController {
   constructor(@Inject(AuthService) private readonly authService: AuthService) {}
 
+  @Public()
   @Post('register')
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto)
   }
 
+  @Public()
   @Post('login')
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto)
@@ -43,6 +45,7 @@ export class UserAuthAliasController {
 export class AdminAuthController {
   constructor(@Inject(AuthService) private readonly authService: AuthService) {}
 
+  @Public()
   @Post('login')
   login(@Body() dto: LoginDto) {
     return this.authService.adminLogin(dto)
@@ -54,6 +57,7 @@ export class AdminAuthController {
 export class AdminAuthAliasController {
   constructor(@Inject(AuthService) private readonly authService: AuthService) {}
 
+  @Public()
   @Post('login')
   login(@Body() dto: LoginDto) {
     return this.authService.adminLogin(dto)

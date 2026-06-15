@@ -19,6 +19,18 @@ async function main() {
     }
   })
   console.log(`Admin user seeded: ${admin.username} (id: ${admin.id}, role: ${admin.role})`)
+
+  const demoUser = await prisma.user.upsert({
+    where: { username: 'user_01' },
+    update: {},
+    create: {
+      username: 'user_01',
+      passwordHash: await bcrypt.hash('user123', 10),
+      role: 'USER',
+      batteryCapacity: 60
+    }
+  })
+  console.log(`Demo user seeded: ${demoUser.username} (id: ${demoUser.id}, role: ${demoUser.role})`)
 }
 
 main()
