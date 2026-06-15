@@ -55,6 +55,7 @@ export class DispatchService {
 
   async triggerBasicAll() {
     await this.autoCompleteCharging()
+    await this.wakeIdlePiles()
     // 依次调度快充和慢充，避免并行竞态
     await this.triggerBasic('FAST')
     await this.triggerBasic('SLOW')
@@ -302,6 +303,44 @@ export class DispatchService {
 
     await Promise.all([...touchedPiles].map((pileId) => this.queueCache.refreshPile(pileId)))
     return applied
+  }
+
+  private async wakeIdlePiles() {
+    const idlePiles = await this.prisma.chargingPile.findMany({
+      where: { physicalState: PhysicalState.ON, workingState: WorkingState.IDLE },
+      include: {
+        orders: {
+          where: { status: OrderStatus.IN_PILE_QUEUE },
+          orderBy: [{ pileQueueEnteredAt: 'asc' }, { submitTime: 'asc' }],
+          take: 1
+        }
+      }
+    })
+
+    for (const pile of idlePiles) {
+      const order = pile.orders[0]
+      if (!order) continue
+
+      const vNow = new Date(virtualNowMs())
+      try {
+        await this.prisma.$transaction(async (tx) => {
+          await tx.chargingOrder.update({
+            where: { id: order.id },
+            data: { status: OrderStatus.CHARGING, startedAt: vNow }
+          })
+          await tx.chargingPile.update({
+            where: { id: pile.id },
+            data: { workingState: WorkingState.CHARGING }
+          })
+          await tx.chargingSession.create({
+            data: { orderId: order.id, pileId: pile.id, startTime: vNow }
+          })
+        })
+        await this.queueCache.refreshPile(pile.id)
+      } catch {
+        // 启动失败不阻塞
+      }
+    }
   }
 
   async autoCompleteCharging() {
