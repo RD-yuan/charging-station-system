@@ -1,27 +1,11 @@
 -- AlterTable
-ALTER TABLE `billingdetail` ADD COLUMN `billingRuleVersion` INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE `BillingDetail` ADD COLUMN `billingRuleVersion` INTEGER NOT NULL DEFAULT 1;
 
 -- AlterTable
-ALTER TABLE `chargingorder` ADD COLUMN `pileQueueEnteredAt` DATETIME(3) NULL;
+ALTER TABLE `ChargingOrder` ADD COLUMN `pileQueueEnteredAt` DATETIME(3) NULL;
 
 -- AlterTable
-ALTER TABLE `chargingsession` ADD COLUMN `sessionStatus` ENUM('ACTIVE', 'CLOSED', 'ABORTED') NOT NULL DEFAULT 'ACTIVE';
-
--- AlterTable
-ALTER TABLE `user` MODIFY `role` VARCHAR(191) NOT NULL DEFAULT 'USER';
-
--- CreateTable
-CREATE TABLE `Administrator` (
-    `id` VARCHAR(191) NOT NULL,
-    `username` VARCHAR(191) NOT NULL,
-    `passwordHash` VARCHAR(191) NOT NULL,
-    `adminName` VARCHAR(191) NOT NULL,
-    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    `updatedAt` DATETIME(3) NOT NULL,
-
-    UNIQUE INDEX `Administrator_username_key`(`username`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE `ChargingSession` ADD COLUMN `sessionStatus` ENUM('ACTIVE', 'CLOSED', 'ABORTED') NOT NULL DEFAULT 'ACTIVE';
 
 -- CreateTable
 CREATE TABLE `BillingRule` (

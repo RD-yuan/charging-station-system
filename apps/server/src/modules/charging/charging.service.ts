@@ -26,7 +26,7 @@ export class ChargingService {
     const uid = userId ?? dto.userId
     if (!uid) throw new BadRequestException('userId is required.')
     await this.ensureUserCanSubmit(uid)
-    await this.ensureWaitingCapacity(dto.chargeMode)
+    await this.ensureWaitingCapacity()
 
     const queueNo = await this.nextQueueNo(dto.chargeMode)
     const order = await this.prisma.chargingOrder.create({
@@ -43,9 +43,10 @@ export class ChargingService {
     return this.queueStatus(order.id)
   }
 
-  async modifyMode(orderId: string, dto: ModifyModeDto) {
+  async modifyMode(orderId: string, dto: ModifyModeDto, userId?: string) {
+    await this.ensureOrderOwner(orderId, userId)
     const order = await this.requireWaitingOrder(orderId)
-    await this.ensureWaitingCapacity(dto.newMode)
+    if (order.chargeMode === dto.newMode) return this.queueStatus(order.id)
     const updated = await this.prisma.chargingOrder.update({
       where: { id: order.id },
       data: {
@@ -59,7 +60,8 @@ export class ChargingService {
     return this.queueStatus(updated.id)
   }
 
-  async modifyAmount(orderId: string, dto: ModifyAmountDto) {
+  async modifyAmount(orderId: string, dto: ModifyAmountDto, userId?: string) {
+    await this.ensureOrderOwner(orderId, userId)
     const order = await this.requireWaitingOrder(orderId)
     const updated = await this.prisma.chargingOrder.update({
       where: { id: order.id },
@@ -70,14 +72,16 @@ export class ChargingService {
     return this.queueStatus(updated.id)
   }
 
-  async cancel(orderId: string, dto: CancelChargingDto) {
+  async cancel(orderId: string, dto: CancelChargingDto, userId?: string) {
+    await this.ensureOrderOwner(orderId, userId)
     const order = await this.prisma.chargingOrder.findUniqueOrThrow({ where: { id: orderId } })
     if (order.status === OrderStatus.WAITING) {
       const updated = await this.prisma.chargingOrder.update({
         where: { id: orderId },
         data: {
           status: OrderStatus.CANCELED,
-          assignedPileId: null
+          assignedPileId: null,
+          finishedAt: new Date()
         }
       })
       await this.queueCache.refreshMode(order.chargeMode)
@@ -90,7 +94,8 @@ export class ChargingService {
         data: {
           status: OrderStatus.CANCELED,
           assignedPileId: null,
-          pileQueueEnteredAt: null
+          pileQueueEnteredAt: null,
+          finishedAt: new Date()
         }
       })
       if (pileId) await this.queueCache.refreshPile(pileId)
@@ -106,7 +111,59 @@ export class ChargingService {
     throw new BadRequestException(`Order ${order.status} cannot be canceled.`)
   }
 
-  async queueStatus(orderId: string) {
+  async listOrders(userId: string) {
+    const orders = await this.prisma.chargingOrder.findMany({
+      where: { userId },
+      include: {
+        detail: {
+          include: {
+            session: true
+          }
+        }
+      },
+      orderBy: [{ submitTime: 'desc' }, { createdAt: 'desc' }]
+    })
+
+    return orders.map((order) => {
+      const detail = order.detail
+        ? {
+            detailId: order.detail.id,
+            orderId: order.id,
+            sessionId: order.detail.sessionId,
+            queueNo: order.queueNo,
+            userId: order.userId,
+            status: order.status,
+            pileId: order.detail.session.pileId,
+            generatedAt: order.detail.generatedAt,
+            startTime: order.detail.session.startTime,
+            stopTime: order.detail.session.stopTime,
+            actualAmount: order.detail.actualAmount,
+            duration: order.detail.duration,
+            chargeFee: order.detail.chargeFee,
+            serviceFee: order.detail.serviceFee,
+            totalFee: order.detail.totalFee
+          }
+        : null
+
+      return {
+        orderId: order.id,
+        queueNo: order.queueNo,
+        status: order.status,
+        chargeMode: order.chargeMode,
+        requestedAmount: order.requestedAmount,
+        assignedPileId: order.assignedPileId,
+        pileId: order.assignedPileId,
+        queueArea: this.queueArea(order.status),
+        submitTime: order.submitTime,
+        startedAt: order.startedAt,
+        finishedAt: order.finishedAt,
+        detail
+      }
+    })
+  }
+
+  async queueStatus(orderId: string, userId?: string) {
+    await this.ensureOrderOwner(orderId, userId)
     const order = await this.prisma.chargingOrder.findUniqueOrThrow({
       where: { id: orderId },
       include: { assignedPile: true }
@@ -117,7 +174,8 @@ export class ChargingService {
     return this.toQueueStatus(order, area, aheadCount, estimatedWaitTime)
   }
 
-  async start(orderId: string) {
+  async start(orderId: string, userId?: string) {
+    await this.ensureOrderOwner(orderId, userId)
     const order = await this.prisma.chargingOrder.findUniqueOrThrow({
       where: { id: orderId },
       include: { assignedPile: true }
@@ -161,7 +219,8 @@ export class ChargingService {
     return { orderId, sessionId: session.id, status: OrderStatus.CHARGING, pileId: order.assignedPileId }
   }
 
-  async stop(orderId: string) {
+  async stop(orderId: string, userId?: string) {
+    await this.ensureOrderOwner(orderId, userId)
     const order = await this.prisma.chargingOrder.findUniqueOrThrow({ where: { id: orderId } })
     if (order.status !== OrderStatus.CHARGING) throw new BadRequestException('Only CHARGING orders can be stopped.')
     const detail = await this.billingService.closeAndBill(orderId, 'USER_STOP', OrderStatus.FINISHED)
@@ -201,12 +260,21 @@ export class ChargingService {
     if (existing) throw new BadRequestException('User already has an unfinished charging order.')
   }
 
-  private async ensureWaitingCapacity(mode: ChargeMode | string) {
+  private async ensureWaitingCapacity() {
     const capacity = Number(this.config.get<string>('WAITING_AREA_SIZE') ?? 20)
     const count = await this.prisma.chargingOrder.count({
-      where: { chargeMode: mode as ChargeMode, status: OrderStatus.WAITING }
+      where: { status: OrderStatus.WAITING }
     })
     if (count >= capacity) throw new BadRequestException('Waiting queue is full.')
+  }
+
+  private async ensureOrderOwner(orderId: string, userId?: string) {
+    if (!userId) return
+    const order = await this.prisma.chargingOrder.findUniqueOrThrow({
+      where: { id: orderId },
+      select: { userId: true }
+    })
+    if (order.userId !== userId) throw new BadRequestException('Order does not belong to current user.')
   }
 
   private queueArea(status: OrderStatus) {

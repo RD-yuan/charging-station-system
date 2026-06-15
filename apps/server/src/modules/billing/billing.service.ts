@@ -12,6 +12,8 @@ interface PriceRule {
   version: number
 }
 
+type SessionWithPile = ChargingSession & { pile: { power: number } }
+
 @Injectable()
 export class BillingService {
   constructor(
@@ -28,26 +30,38 @@ export class BillingService {
     const order = await this.prisma.chargingOrder.findUnique({
       where: { id: orderId },
       include: {
-        assignedPile: true,
         detail: true,
         sessions: {
-          where: { sessionStatus: 'ACTIVE' },
           include: { pile: true },
-          orderBy: { startTime: 'desc' },
-          take: 1
+          orderBy: { startTime: 'asc' }
         }
       }
     })
     if (!order) throw new BadRequestException(`Order ${orderId} not found.`)
     if (order.detail) return this.detailByOrder(orderId)
-    const session = order.sessions[0]
+
+    const session = order.sessions.find((item) => item.sessionStatus === 'ACTIVE')
     if (!session) throw new BadRequestException(`Order ${orderId} has no active charging session.`)
 
     const stopTime = new Date()
     const rules = await this.activeRules()
-    const actualAmount = this.actualAmount(order.requestedAmount, session, stopTime)
-    const duration = round((stopTime.getTime() - session.startTime.getTime()) / 3_600_000, 4)
-    const chargeFee = this.calculateChargeFee(session.startTime, stopTime, actualAmount, rules)
+    const activeActualAmount = this.actualAmount(order.requestedAmount, session, stopTime)
+    const activeDuration = this.sessionDuration(session.startTime, stopTime)
+    const previousSessions = order.sessions.filter((item) =>
+      item.id !== session.id &&
+      item.stopTime &&
+      item.actualAmount &&
+      item.actualAmount > 0
+    )
+    const previousAmount = previousSessions.reduce((sum, item) => sum + (item.actualAmount ?? 0), 0)
+    const previousDuration = previousSessions.reduce((sum, item) => sum + this.sessionDuration(item.startTime, item.stopTime!), 0)
+    const previousChargeFee = previousSessions.reduce((sum, item) => {
+      return sum + this.calculateChargeFee(item.startTime, item.stopTime!, item.actualAmount ?? 0, rules)
+    }, 0)
+
+    const actualAmount = round(previousAmount + activeActualAmount, 4)
+    const duration = round(previousDuration + activeDuration, 4)
+    const chargeFee = round(previousChargeFee + this.calculateChargeFee(session.startTime, stopTime, activeActualAmount, rules), 2)
     const serviceFeeRate = rules[0]?.serviceFeeRate ?? 0.8
     const serviceFee = round(actualAmount * serviceFeeRate, 2)
     const totalFee = round(chargeFee + serviceFee, 2)
@@ -58,7 +72,7 @@ export class BillingService {
         where: { id: session.id },
         data: {
           stopTime,
-          actualAmount,
+          actualAmount: activeActualAmount,
           stopReason,
           sessionStatus: targetStatus === OrderStatus.ABORTED ? 'ABORTED' : 'CLOSED'
         }
@@ -75,8 +89,8 @@ export class BillingService {
         data: {
           workingState: pileWorkingState,
           totalChargeCount: { increment: 1 },
-          totalChargeDuration: { increment: duration },
-          totalChargeAmount: { increment: actualAmount }
+          totalChargeDuration: { increment: activeDuration },
+          totalChargeAmount: { increment: activeActualAmount }
         }
       })
       return tx.billingDetail.create({
@@ -102,21 +116,25 @@ export class BillingService {
     return this.toDetailDto(detail)
   }
 
-  async detailByOrder(orderId: string) {
+  async detailByOrder(orderId: string, userId?: string) {
     const detail = await this.prisma.billingDetail.findUnique({
       where: { orderId },
       include: { order: true, session: { include: { pile: true } } }
     })
-    if (!detail) throw new BadRequestException(`Order ${orderId} has no billing detail.`)
-    return this.toDetailDto(detail)
+    if (detail) {
+      if (userId && detail.order.userId !== userId) throw new BadRequestException('Detail does not belong to current user.')
+      return this.toDetailDto(detail)
+    }
+    throw new BadRequestException(`Order ${orderId} has no billing detail.`)
   }
 
-  async detailById(detailId: string) {
+  async detailById(detailId: string, userId?: string) {
     const detail = await this.prisma.billingDetail.findUnique({
       where: { id: detailId },
       include: { order: true, session: { include: { pile: true } } }
     })
     if (!detail) throw new BadRequestException(`Detail ${detailId} not found.`)
+    if (userId && detail.order.userId !== userId) throw new BadRequestException('Detail does not belong to current user.')
     return this.toDetailDto(detail)
   }
 
@@ -155,11 +173,15 @@ export class BillingService {
     return round(chargeFee, 2)
   }
 
-  private actualAmount(requestedAmount: number, session: ChargingSession & { pile: { power: number } }, stopTime: Date) {
+  private actualAmount(requestedAmount: number, session: SessionWithPile, stopTime: Date) {
     if (session.actualAmount && session.actualAmount > 0) return session.actualAmount
     const elapsedHours = Math.max(0, (stopTime.getTime() - session.startTime.getTime()) / 3_600_000)
     const delivered = elapsedHours * session.pile.power
-    return round(Math.max(0.01, Math.min(requestedAmount, delivered || requestedAmount)), 4)
+    return round(Math.min(requestedAmount, delivered), 4)
+  }
+
+  private sessionDuration(startTime: Date, stopTime: Date) {
+    return round((stopTime.getTime() - startTime.getTime()) / 3_600_000, 4)
   }
 
   private priceAt(time: Date, rules: PriceRule[]) {
@@ -189,7 +211,7 @@ export class BillingService {
     chargeFee: number
     serviceFee: number
     totalFee: number
-    order: { id: string; queueNo: string; userId: string }
+    order: { id: string; queueNo: string; userId: string; status: OrderStatus }
     session: { id: string; pileId: string; startTime: Date; stopTime: Date | null; pile: { id: string } }
   }) {
     return {
@@ -198,6 +220,7 @@ export class BillingService {
       sessionId: detail.session.id,
       queueNo: detail.order.queueNo,
       userId: detail.order.userId,
+      status: detail.order.status,
       pileId: detail.session.pileId,
       generatedAt: detail.generatedAt,
       startTime: detail.session.startTime,
@@ -209,6 +232,7 @@ export class BillingService {
       totalFee: detail.totalFee
     }
   }
+
 }
 
 function defaultRules(): PriceRule[] {

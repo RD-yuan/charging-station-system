@@ -1,31 +1,84 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { apiRequest } from '../../api/http'
+
+type ChargeMode = 'FAST' | 'SLOW'
+type OrderStatus = 'WAITING' | 'IN_PILE_QUEUE' | 'CHARGING' | 'FINISHED' | 'CANCELED' | 'ABORTED'
+
+interface OrderDetail {
+  detailId: string
+  orderId: string
+  sessionId: string | null
+  queueNo: string
+  status: OrderStatus
+  pileId: string | null
+  generatedAt: string
+  startTime: string | null
+  stopTime: string | null
+  actualAmount: number
+  duration: number
+  chargeFee: number
+  serviceFee: number
+  totalFee: number
+}
+
+interface UserOrder {
+  orderId: string
+  queueNo: string
+  status: OrderStatus
+  chargeMode: ChargeMode
+  requestedAmount: number
+  assignedPileId: string | null
+  pileId: string | null
+  queueArea: string
+  submitTime: string
+  startedAt: string | null
+  finishedAt: string | null
+  detail: OrderDetail | null
+}
+
+interface QueueStatus {
+  orderId: string
+  queueNo: string
+  status: OrderStatus
+  queueArea: string
+  aheadCount: number
+  estimatedWaitTime: number
+  chargeMode?: ChargeMode
+  requestedAmount?: number
+  assignedPileId?: string | null
+}
 
 const userId = localStorage.getItem('user_id') ?? ''
 const username = localStorage.getItem('username') ?? ''
 
 const requestForm = reactive({
-  chargeMode: 'FAST' as 'FAST' | 'SLOW',
+  chargeMode: 'FAST' as ChargeMode,
   requestedAmount: 30
 })
 
-const queueStatus = reactive({
-  orderId: '未生成',
-  queueNo: '--',
-  status: 'WAITING',
-  queueArea: '--',
-  aheadCount: 0,
-  estimatedWaitTime: 0,
-  chargeMode: 'FAST' as 'FAST' | 'SLOW' | undefined,
-  requestedAmount: 30 as number | undefined
-})
-
-const details = ref<Array<Record<string, unknown>>>([])
+const orders = ref<UserOrder[]>([])
+const selectedOrderId = ref<string | null>(null)
+const queueStatus = ref<QueueStatus | null>(null)
+const loading = ref(false)
 const toast = ref<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
 
-const hasValidOrder = computed(() => Boolean(queueStatus.orderId && queueStatus.orderId !== '未生成'))
-const canModify = computed(() => hasValidOrder.value && queueStatus.status === 'WAITING')
+const openStatuses: OrderStatus[] = ['WAITING', 'IN_PILE_QUEUE', 'CHARGING']
+const activeOrder = computed(() => orders.value.find((order) => openStatuses.includes(order.status)) ?? null)
+const selectedOrder = computed(() => {
+  return orders.value.find((order) => order.orderId === selectedOrderId.value) ?? activeOrder.value ?? orders.value[0] ?? null
+})
+const canModify = computed(() => selectedOrder.value?.status === 'WAITING')
+const canStop = computed(() => selectedOrder.value?.status === 'CHARGING')
+const canCancel = computed(() => {
+  const status = selectedOrder.value?.status
+  return status === 'WAITING' || status === 'IN_PILE_QUEUE'
+})
+const details = computed(() => orders.value.map((order) => order.detail).filter(Boolean) as OrderDetail[])
+
+onMounted(() => {
+  void loadOrders(true)
+})
 
 function showToast(type: 'success' | 'error' | 'info', text: string) {
   toast.value = { type, text }
@@ -39,18 +92,20 @@ function showError(error: unknown, fallback: string) {
   showToast('error', message)
 }
 
-function applyQueueData(data: Partial<typeof queueStatus>) {
-  Object.assign(queueStatus, data)
-  if (data.chargeMode) requestForm.chargeMode = data.chargeMode
-  if (typeof data.requestedAmount === 'number') requestForm.requestedAmount = data.requestedAmount
-}
-
-function hasOrder() {
-  if (!hasValidOrder.value) {
-    showToast('error', '请先提交充电请求')
-    return false
+async function loadOrders(silent = false) {
+  if (!userId) return
+  loading.value = true
+  try {
+    orders.value = await apiRequest<UserOrder[]>('/user/charging/orders', {}, 'user')
+    if (!selectedOrderId.value || !orders.value.some((order) => order.orderId === selectedOrderId.value)) {
+      selectedOrderId.value = activeOrder.value?.orderId ?? orders.value[0]?.orderId ?? null
+    }
+    if (!silent) showToast('info', '订单列表已刷新')
+  } catch (error) {
+    showError(error, '加载订单失败')
+  } finally {
+    loading.value = false
   }
-  return true
 }
 
 async function submitRequest() {
@@ -59,7 +114,7 @@ async function submitRequest() {
     return
   }
   try {
-    const data = await apiRequest<Partial<typeof queueStatus>>(
+    const data = await apiRequest<QueueStatus>(
       '/user/charging/request',
       {
         method: 'POST',
@@ -70,44 +125,54 @@ async function submitRequest() {
       },
       'user'
     )
-    applyQueueData(data)
-    showToast('success', '充电请求已提交，等候区状态下可修改模式与电量')
+    queueStatus.value = data
+    selectedOrderId.value = data.orderId
+    await loadOrders(true)
+    showToast('success', '订单已提交，服务器已接管调度')
   } catch (error) {
     showError(error, '提交充电请求失败')
   }
 }
 
 async function queryQueue() {
-  if (!hasOrder()) return
+  const order = selectedOrder.value
+  if (!order) {
+    showToast('error', '暂无可查询订单')
+    return
+  }
+  if (!openStatuses.includes(order.status)) {
+    showToast('info', '该订单已结束，请查看详单')
+    return
+  }
   try {
-    const data = await apiRequest<Partial<typeof queueStatus>>(
-      `/user/charging/${queueStatus.orderId}/queue`,
+    queueStatus.value = await apiRequest<QueueStatus>(
+      `/user/charging/${order.orderId}/queue`,
       {},
       'user'
     )
-    applyQueueData(data)
-    showToast('info', '已刷新排队状态')
+    await loadOrders(true)
+    showToast('info', '排队状态已刷新')
   } catch (error) {
     showError(error, '查询排队失败')
   }
 }
 
 async function modifyMode() {
-  if (!hasOrder()) return
-  if (!canModify.value) {
-    showToast('error', '仅 WAITING 状态可修改模式，已进入充电桩队列后请取消后重新排队')
+  const order = selectedOrder.value
+  if (!order || !canModify.value) {
+    showToast('error', '仅 WAITING 状态可修改模式')
     return
   }
   try {
-    const data = await apiRequest<Partial<typeof queueStatus>>(
-      `/user/charging/${queueStatus.orderId}/mode`,
+    queueStatus.value = await apiRequest<QueueStatus>(
+      `/user/charging/${order.orderId}/mode`,
       {
         method: 'PUT',
         body: JSON.stringify({ newMode: requestForm.chargeMode })
       },
       'user'
     )
-    applyQueueData(data)
+    await loadOrders(true)
     showToast('success', '充电模式已修改')
   } catch (error) {
     showError(error, '修改模式失败')
@@ -115,52 +180,40 @@ async function modifyMode() {
 }
 
 async function modifyAmount() {
-  if (!hasOrder()) return
-  if (!canModify.value) {
-    showToast('error', '仅 WAITING 状态可修改电量，已进入充电桩队列后请取消后重新排队')
+  const order = selectedOrder.value
+  if (!order || !canModify.value) {
+    showToast('error', '仅 WAITING 状态可修改电量')
     return
   }
   try {
-    const data = await apiRequest<Partial<typeof queueStatus>>(
-      `/user/charging/${queueStatus.orderId}/amount`,
+    queueStatus.value = await apiRequest<QueueStatus>(
+      `/user/charging/${order.orderId}/amount`,
       {
         method: 'PUT',
         body: JSON.stringify({ newAmount: requestForm.requestedAmount })
       },
       'user'
     )
-    applyQueueData(data)
+    await loadOrders(true)
     showToast('success', '请求电量已修改')
   } catch (error) {
     showError(error, '修改电量失败')
   }
 }
 
-async function startCharging() {
-  if (!hasOrder()) return
-  try {
-    const data = await apiRequest<{ status: string }>(
-      `/user/charging/${queueStatus.orderId}/start`,
-      { method: 'POST', body: '{}' },
-      'user'
-    )
-    queueStatus.status = data.status
-    showToast('success', '开始充电')
-  } catch (error) {
-    showError(error, '开始充电失败')
-  }
-}
-
 async function stopCharging() {
-  if (!hasOrder()) return
+  const order = selectedOrder.value
+  if (!order || !canStop.value) {
+    showToast('error', '仅 CHARGING 状态可结束充电')
+    return
+  }
   try {
-    const data = await apiRequest<Record<string, unknown>>(
-      `/user/charging/${queueStatus.orderId}/stop`,
+    await apiRequest<OrderDetail>(
+      `/user/charging/${order.orderId}/stop`,
       { method: 'POST', body: '{}' },
       'user'
     )
-    queueStatus.status = 'FINISHED'
-    details.value.unshift(data)
+    await loadOrders(true)
     showToast('success', '充电结束，已生成详单')
   } catch (error) {
     showError(error, '结束充电失败')
@@ -168,37 +221,59 @@ async function stopCharging() {
 }
 
 async function cancelCharging() {
-  if (!hasOrder()) return
+  const order = selectedOrder.value
+  if (!order || !canCancel.value) {
+    showToast('error', '仅 WAITING 或 IN_PILE_QUEUE 状态可取消订单')
+    return
+  }
   try {
-    const data = await apiRequest<Record<string, unknown>>(
-      `/user/charging/${queueStatus.orderId}/cancel`,
+    await apiRequest<QueueStatus>(
+      `/user/charging/${order.orderId}/cancel`,
       {
         method: 'POST',
-        body: JSON.stringify({
-          reason: queueStatus.status === 'CHARGING' ? 'USER_STOP' : 'USER_CANCEL'
-        })
+        body: JSON.stringify({ reason: 'USER_CANCEL' })
       },
       'user'
     )
-    if (data.detailId) {
-      queueStatus.status = 'FINISHED'
-      details.value.unshift(data)
-    } else {
-      applyQueueData(data as Partial<typeof queueStatus>)
-    }
-    showToast('info', '取消流程已触发')
+    await loadOrders(true)
+    showToast('info', '订单已取消')
   } catch (error) {
-    showError(error, '取消充电失败')
+    showError(error, '取消订单失败')
   }
 }
 
-const statusColor: Record<string, string> = {
-  WAITING: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  IN_PILE_QUEUE: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  CHARGING: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  FINISHED: 'bg-slate-500/10 text-slate-300 border-slate-500/20',
-  CANCELED: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
-  ABORTED: 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+function selectOrder(order: UserOrder) {
+  selectedOrderId.value = order.orderId
+  requestForm.chargeMode = order.chargeMode
+  requestForm.requestedAmount = order.requestedAmount
+}
+
+function formatTime(value?: string | null) {
+  if (!value) return '--'
+  return new Date(value).toLocaleString()
+}
+
+function formatNumber(value?: number | null, digits = 2) {
+  if (typeof value !== 'number') return '--'
+  return value.toFixed(digits)
+}
+
+const statusLabel: Record<OrderStatus, string> = {
+  WAITING: '等候区',
+  IN_PILE_QUEUE: '桩队列',
+  CHARGING: '充电中',
+  FINISHED: '已完成',
+  CANCELED: '已取消',
+  ABORTED: '已中止'
+}
+
+const statusColor: Record<OrderStatus, string> = {
+  WAITING: 'bg-amber-500/10 text-amber-700 border-amber-500/20',
+  IN_PILE_QUEUE: 'bg-blue-500/10 text-blue-700 border-blue-500/20',
+  CHARGING: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20',
+  FINISHED: 'bg-slate-500/10 text-slate-700 border-slate-500/20',
+  CANCELED: 'bg-rose-500/10 text-rose-700 border-rose-500/20',
+  ABORTED: 'bg-rose-500/10 text-rose-700 border-rose-500/20'
 }
 </script>
 
@@ -211,7 +286,7 @@ const statusColor: Record<string, string> = {
       </div>
       <div
         v-if="toast"
-        class="px-4 py-2 rounded-xl text-xs font-medium border"
+        class="px-4 py-2 rounded-lg text-xs font-medium border"
         :class="{
           'bg-emerald-500/10 text-emerald-600 border-emerald-500/20': toast.type === 'success',
           'bg-rose-500/10 text-rose-600 border-rose-500/20': toast.type === 'error',
@@ -223,7 +298,7 @@ const statusColor: Record<string, string> = {
     </div>
 
     <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-      <section class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+      <section class="bg-white border border-slate-200 rounded-lg p-6 shadow-sm">
         <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider mb-5">提交充电请求</h3>
         <div class="space-y-4">
           <div>
@@ -231,7 +306,7 @@ const statusColor: Record<string, string> = {
             <div class="flex gap-2">
               <button
                 type="button"
-                class="flex-1 py-2.5 rounded-xl text-xs font-bold border transition-all"
+                class="flex-1 py-2.5 rounded-lg text-xs font-bold border transition-all"
                 :class="requestForm.chargeMode === 'FAST' ? 'bg-emerald-500 text-slate-950 border-emerald-500' : 'bg-slate-50 text-slate-600 border-slate-200'"
                 @click="requestForm.chargeMode = 'FAST'"
               >
@@ -239,7 +314,7 @@ const statusColor: Record<string, string> = {
               </button>
               <button
                 type="button"
-                class="flex-1 py-2.5 rounded-xl text-xs font-bold border transition-all"
+                class="flex-1 py-2.5 rounded-lg text-xs font-bold border transition-all"
                 :class="requestForm.chargeMode === 'SLOW' ? 'bg-emerald-500 text-slate-950 border-emerald-500' : 'bg-slate-50 text-slate-600 border-slate-200'"
                 @click="requestForm.chargeMode = 'SLOW'"
               >
@@ -254,24 +329,43 @@ const statusColor: Record<string, string> = {
               type="number"
               min="1"
               step="5"
-              class="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm font-mono focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10"
+              class="w-full bg-slate-50 border border-slate-200 rounded-lg py-3 px-4 text-sm font-mono focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10"
             />
           </div>
-          <p
-            class="text-[11px] rounded-xl px-3 py-2 border"
-            :class="canModify ? 'text-amber-700 bg-amber-50 border-amber-200' : 'text-slate-500 bg-slate-50 border-slate-200'"
-          >
-            {{ canModify
-              ? '当前为等候区（WAITING），可修改充电模式与请求电量。'
-              : hasValidOrder
-                ? '订单已进入充电桩队列或正在充电，无法修改模式/电量；如需变更请先取消后重新排队。'
-                : '提交充电请求后，在等候区状态下可修改模式与电量。' }}
-          </p>
           <div class="flex flex-wrap gap-2 pt-1">
-            <button class="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold rounded-xl" @click="submitRequest">提交请求</button>
-            <button class="px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl" @click="queryQueue">查询排队</button>
+            <button class="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold rounded-lg" @click="submitRequest">提交请求</button>
+            <button class="px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg" @click="() => loadOrders()">刷新订单</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="bg-white border border-slate-200 rounded-lg p-6 shadow-sm">
+        <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider mb-5">选中订单</h3>
+        <div v-if="selectedOrder" class="space-y-5">
+          <div class="grid grid-cols-2 gap-3">
+            <div class="bg-slate-50 rounded-lg p-3 border border-slate-100">
+              <p class="text-[10px] text-slate-500 uppercase">排队号</p>
+              <p class="text-lg font-bold font-mono text-slate-900 mt-1">{{ selectedOrder.queueNo }}</p>
+            </div>
+            <div class="bg-slate-50 rounded-lg p-3 border border-slate-100">
+              <p class="text-[10px] text-slate-500 uppercase">状态</p>
+              <span class="inline-block mt-1 px-2 py-1 rounded-md text-[10px] font-bold border" :class="statusColor[selectedOrder.status]">
+                {{ statusLabel[selectedOrder.status] }} / {{ selectedOrder.status }}
+              </span>
+            </div>
+            <div class="bg-slate-50 rounded-lg p-3 border border-slate-100">
+              <p class="text-[10px] text-slate-500 uppercase">区域</p>
+              <p class="text-sm font-bold font-mono text-slate-900 mt-1">{{ queueStatus?.queueArea ?? selectedOrder.queueArea }}</p>
+            </div>
+            <div class="bg-slate-50 rounded-lg p-3 border border-slate-100">
+              <p class="text-[10px] text-slate-500 uppercase">充电桩</p>
+              <p class="text-sm font-bold font-mono text-slate-900 mt-1">{{ selectedOrder.assignedPileId ?? '--' }}</p>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button class="px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-lg" @click="queryQueue">查询排队</button>
             <button
-              class="px-4 py-2.5 text-xs font-bold rounded-xl border transition-all"
+              class="px-4 py-2.5 text-xs font-bold rounded-lg border transition-all"
               :class="canModify ? 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700' : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'"
               :disabled="!canModify"
               @click="modifyMode"
@@ -279,50 +373,89 @@ const statusColor: Record<string, string> = {
               修改模式
             </button>
             <button
-              class="px-4 py-2.5 text-xs font-bold rounded-xl border transition-all"
+              class="px-4 py-2.5 text-xs font-bold rounded-lg border transition-all"
               :class="canModify ? 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700' : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'"
               :disabled="!canModify"
               @click="modifyAmount"
             >
               修改电量
             </button>
+            <button
+              class="px-4 py-2.5 text-xs font-bold rounded-lg"
+              :class="canStop ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950' : 'bg-slate-100 text-slate-400 cursor-not-allowed'"
+              :disabled="!canStop"
+              @click="stopCharging"
+            >
+              结束充电
+            </button>
+            <button
+              class="px-4 py-2.5 text-xs font-bold rounded-lg"
+              :class="canCancel ? 'bg-rose-500 hover:bg-rose-400 text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'"
+              :disabled="!canCancel"
+              @click="cancelCharging"
+            >
+              取消订单
+            </button>
           </div>
         </div>
-      </section>
-
-      <section class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-        <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider mb-5">当前订单</h3>
-        <div class="grid grid-cols-2 gap-3 mb-5">
-          <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
-            <p class="text-[10px] text-slate-500 uppercase">排队号</p>
-            <p class="text-lg font-bold font-mono text-slate-900 mt-1">{{ queueStatus.queueNo }}</p>
-          </div>
-          <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
-            <p class="text-[10px] text-slate-500 uppercase">状态</p>
-            <span class="inline-block mt-1 px-2 py-1 rounded-lg text-[10px] font-bold border" :class="statusColor[queueStatus.status] ?? statusColor.WAITING">
-              {{ queueStatus.status }}
-            </span>
-          </div>
-          <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
-            <p class="text-[10px] text-slate-500 uppercase">区域</p>
-            <p class="text-sm font-bold font-mono text-slate-900 mt-1">{{ queueStatus.queueArea }}</p>
-          </div>
-          <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
-            <p class="text-[10px] text-slate-500 uppercase">预计等待</p>
-            <p class="text-sm font-bold font-mono text-slate-900 mt-1">{{ queueStatus.estimatedWaitTime }} 分钟</p>
-          </div>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <button class="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl" @click="startCharging">开始充电</button>
-          <button class="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold rounded-xl" @click="stopCharging">结束充电</button>
-          <button class="px-4 py-2.5 bg-rose-500 hover:bg-rose-400 text-white text-xs font-bold rounded-xl" @click="cancelCharging">取消充电</button>
+        <div v-else class="text-sm text-slate-500 py-10 text-center border border-dashed border-slate-200 rounded-lg">
+          暂无订单
         </div>
       </section>
     </div>
 
-    <section class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+    <section class="bg-white border border-slate-200 rounded-lg p-6 shadow-sm">
+      <div class="flex items-center justify-between gap-3 mb-5">
+        <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider">全部订单</h3>
+        <span class="text-xs text-slate-500 font-mono">{{ loading ? '加载中...' : `${orders.length} 条` }}</span>
+      </div>
+      <div v-if="orders.length === 0" class="text-sm text-slate-500 py-8 text-center border border-dashed border-slate-200 rounded-lg">
+        暂无订单记录
+      </div>
+      <div v-else class="overflow-x-auto">
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="border-b border-slate-200 text-slate-500 uppercase tracking-wider">
+              <th class="py-3 pr-4">排队号</th>
+              <th class="py-3 pr-4">模式</th>
+              <th class="py-3 pr-4">请求电量</th>
+              <th class="py-3 pr-4">状态</th>
+              <th class="py-3 pr-4">充电桩</th>
+              <th class="py-3 pr-4">提交时间</th>
+              <th class="py-3">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="order in orders"
+              :key="order.orderId"
+              class="border-b border-slate-100 hover:bg-slate-50"
+              :class="selectedOrderId === order.orderId ? 'bg-emerald-50/50' : ''"
+            >
+              <td class="py-3 pr-4 font-mono font-bold">{{ order.queueNo }}</td>
+              <td class="py-3 pr-4">{{ order.chargeMode }}</td>
+              <td class="py-3 pr-4">{{ order.requestedAmount }} kWh</td>
+              <td class="py-3 pr-4">
+                <span class="inline-block px-2 py-1 rounded-md text-[10px] font-bold border" :class="statusColor[order.status]">
+                  {{ statusLabel[order.status] }}
+                </span>
+              </td>
+              <td class="py-3 pr-4 font-mono">{{ order.assignedPileId ?? '--' }}</td>
+              <td class="py-3 pr-4 text-slate-500">{{ formatTime(order.submitTime) }}</td>
+              <td class="py-3">
+                <button class="px-3 py-1.5 bg-white border border-slate-200 rounded-md text-slate-700 hover:bg-slate-50 font-bold" @click="selectOrder(order)">
+                  查看
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="bg-white border border-slate-200 rounded-lg p-6 shadow-sm">
       <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider mb-5">充电详单</h3>
-      <div v-if="details.length === 0" class="text-sm text-slate-500 py-8 text-center border border-dashed border-slate-200 rounded-xl">
+      <div v-if="details.length === 0" class="text-sm text-slate-500 py-8 text-center border border-dashed border-slate-200 rounded-lg">
         暂无详单记录
       </div>
       <div v-else class="overflow-x-auto">
@@ -330,6 +463,8 @@ const statusColor: Record<string, string> = {
           <thead>
             <tr class="border-b border-slate-200 text-slate-500 uppercase tracking-wider">
               <th class="py-3 pr-4">详单编号</th>
+              <th class="py-3 pr-4">排队号</th>
+              <th class="py-3 pr-4">状态</th>
               <th class="py-3 pr-4">充电桩</th>
               <th class="py-3 pr-4">电量</th>
               <th class="py-3 pr-4">时长</th>
@@ -339,14 +474,20 @@ const statusColor: Record<string, string> = {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(row, index) in details" :key="String(row.detailId ?? index)" class="border-b border-slate-100 hover:bg-slate-50">
+            <tr v-for="row in details" :key="row.detailId" class="border-b border-slate-100 hover:bg-slate-50">
               <td class="py-3 pr-4 font-mono">{{ row.detailId }}</td>
-              <td class="py-3 pr-4 font-mono">{{ row.pileId }}</td>
-              <td class="py-3 pr-4">{{ row.actualAmount }}</td>
-              <td class="py-3 pr-4">{{ row.duration }}</td>
-              <td class="py-3 pr-4">{{ row.chargeFee }}</td>
-              <td class="py-3 pr-4">{{ row.serviceFee }}</td>
-              <td class="py-3 font-bold text-emerald-600">{{ row.totalFee }}</td>
+              <td class="py-3 pr-4 font-mono">{{ row.queueNo }}</td>
+              <td class="py-3 pr-4">
+                <span class="inline-block px-2 py-1 rounded-md text-[10px] font-bold border" :class="statusColor[row.status]">
+                  {{ statusLabel[row.status] }}
+                </span>
+              </td>
+              <td class="py-3 pr-4 font-mono">{{ row.pileId ?? '--' }}</td>
+              <td class="py-3 pr-4">{{ formatNumber(row.actualAmount, 4) }} kWh</td>
+              <td class="py-3 pr-4">{{ formatNumber(row.duration, 4) }} h</td>
+              <td class="py-3 pr-4">{{ formatNumber(row.chargeFee) }}</td>
+              <td class="py-3 pr-4">{{ formatNumber(row.serviceFee) }}</td>
+              <td class="py-3 font-bold text-emerald-600">{{ formatNumber(row.totalFee) }}</td>
             </tr>
           </tbody>
         </table>

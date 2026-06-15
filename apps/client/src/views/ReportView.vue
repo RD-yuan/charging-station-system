@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 
 interface BillingDetail {
   id: string
   pileId: string
   userId: string
+  count: number
   energy: number
-  duration: number // minutes
+  duration: number
   feeCharge: number
   feeService: number
   feeTotal: number
@@ -15,13 +16,16 @@ interface BillingDetail {
 
 const props = defineProps<{
   billingHistory: Array<BillingDetail>
+  timeType: 'DAY' | 'WEEK' | 'MONTH'
 }>()
 
-const timeRange = ref<'DAILY' | 'WEEKLY' | 'MONTHLY'>('DAILY')
+const emit = defineEmits<{
+  'change-time-type': ['DAY' | 'WEEK' | 'MONTH']
+}>()
 
 // Aggregated values
 const aggregatedStats = computed(() => {
-  const count = props.billingHistory.length
+  const count = props.billingHistory.reduce((sum, item) => sum + item.count, 0)
   let totalEnergy = 0
   let totalCharge = 0
   let totalService = 0
@@ -40,20 +44,23 @@ const aggregatedStats = computed(() => {
     totalCharge: totalCharge.toFixed(2),
     totalService: totalService.toFixed(2),
     totalRevenue: (totalCharge + totalService).toFixed(2),
-    avgDuration: count > 0 ? Math.round(totalDuration / count) : 0
+    avgDuration: count > 0 ? (totalDuration / count).toFixed(2) : '0.00'
   }
 })
 
 // Specific stats per pile ID
 const pileStats = computed(() => {
-  const stats: Record<string, { count: number; energy: number; total: number }> = {}
+  const stats: Record<string, { count: number; energy: number; duration: number; charge: number; service: number; total: number }> = {}
 
   props.billingHistory.forEach(item => {
     if (!stats[item.pileId]) {
-      stats[item.pileId] = { count: 0, energy: 0, total: 0 }
+      stats[item.pileId] = { count: 0, energy: 0, duration: 0, charge: 0, service: 0, total: 0 }
     }
-    stats[item.pileId].count++
+    stats[item.pileId].count += item.count
     stats[item.pileId].energy += item.energy
+    stats[item.pileId].duration += item.duration
+    stats[item.pileId].charge += item.feeCharge
+    stats[item.pileId].service += item.feeService
     stats[item.pileId].total += item.feeTotal
   })
 
@@ -61,6 +68,9 @@ const pileStats = computed(() => {
     pileId: id,
     count: val.count,
     energy: val.energy.toFixed(1),
+    duration: val.duration.toFixed(2),
+    charge: val.charge.toFixed(2),
+    service: val.service.toFixed(2),
     total: val.total.toFixed(2)
   })).sort((a, b) => a.pileId.localeCompare(b.pileId))
 })
@@ -76,20 +86,20 @@ const pileStats = computed(() => {
       </div>
       <div class="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
         <button 
-          @click="timeRange = 'DAILY'"
-          :class="`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${timeRange === 'DAILY' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
+          @click="emit('change-time-type', 'DAY')"
+          :class="`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${timeType === 'DAY' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
         >
           日报表 (Daily)
         </button>
         <button 
-          @click="timeRange = 'WEEKLY'"
-          :class="`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${timeRange === 'WEEKLY' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
+          @click="emit('change-time-type', 'WEEK')"
+          :class="`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${timeType === 'WEEK' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
         >
           周报表 (Weekly)
         </button>
         <button 
-          @click="timeRange = 'MONTHLY'"
-          :class="`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${timeRange === 'MONTHLY' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
+          @click="emit('change-time-type', 'MONTH')"
+          :class="`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${timeType === 'MONTH' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
         >
           月报表 (Monthly)
         </button>
@@ -112,7 +122,7 @@ const pileStats = computed(() => {
       </div>
       <div class="bg-slate-50 p-4 rounded-xl border border-slate-150">
         <p class="text-[10px] uppercase font-bold text-slate-400 font-mono">单车平均充能用时</p>
-        <p class="text-lg font-bold font-mono text-slate-900 mt-1">{{ aggregatedStats.avgDuration }} <span class="text-xs font-normal text-slate-500">分钟</span></p>
+        <p class="text-lg font-bold font-mono text-slate-900 mt-1">{{ aggregatedStats.avgDuration }} <span class="text-xs font-normal text-slate-500">小时</span></p>
       </div>
     </div>
 
@@ -129,7 +139,10 @@ const pileStats = computed(() => {
             <tr class="bg-slate-100/30 text-slate-500 font-semibold border-b border-slate-100">
               <th class="px-5 py-3">充电桩号</th>
               <th class="px-5 py-3 text-center">累计派单服务次数</th>
+              <th class="px-5 py-3 text-center">累计时长 (小时)</th>
               <th class="px-5 py-3 text-center">累积电量总计 (kWh)</th>
+              <th class="px-5 py-3 text-right">充电费 (元)</th>
+              <th class="px-5 py-3 text-right">服务费 (元)</th>
               <th class="px-5 py-3 text-right">累计核算收益 (元)</th>
             </tr>
           </thead>
@@ -137,7 +150,10 @@ const pileStats = computed(() => {
             <tr v-for="pile in pileStats" :key="pile.pileId" class="hover:bg-slate-50/20">
               <td class="px-5 py-3.5 font-mono font-bold text-slate-900">{{ pile.pileId }} 号充电桩</td>
               <td class="px-5 py-3.5 text-center font-mono font-medium">{{ pile.count }} 次</td>
+              <td class="px-5 py-3.5 text-center font-mono font-medium">{{ pile.duration }}</td>
               <td class="px-5 py-3.5 text-center font-mono font-medium">{{ pile.energy }}</td>
+              <td class="px-5 py-3.5 text-right font-mono font-medium">¥{{ pile.charge }}</td>
+              <td class="px-5 py-3.5 text-right font-mono font-medium">¥{{ pile.service }}</td>
               <td class="px-5 py-3.5 text-right font-mono font-bold text-slate-950">¥{{ pile.total }}</td>
             </tr>
           </tbody>
@@ -190,7 +206,7 @@ const pileStats = computed(() => {
             <th class="px-5 py-2.5">账单号</th>
             <th class="px-5 py-2.5">车位桩号</th>
             <th class="px-5 py-2.5">用户账号</th>
-            <th class="px-5 py-2.5 text-center">时长 (分)</th>
+            <th class="px-5 py-2.5 text-center">时长 (小时)</th>
             <th class="px-5 py-2.5 text-center">对应电量</th>
             <th class="px-5 py-2.5 text-center">充电费</th>
             <th class="px-5 py-2.5 text-center">服务费</th>
@@ -202,7 +218,7 @@ const pileStats = computed(() => {
             <td class="px-5 py-3 text-slate-900 truncate max-w-[120px]" :title="bill.id">{{ bill.id }}</td>
             <td class="px-5 py-3 font-sans font-medium">{{ bill.pileId }} 号桩</td>
             <td class="px-5 py-3">{{ bill.userId }}</td>
-            <td class="px-5 py-3 text-center">{{ bill.duration }}</td>
+            <td class="px-5 py-3 text-center">{{ bill.duration.toFixed(2) }}</td>
             <td class="px-5 py-3 text-center">{{ bill.energy.toFixed(1) }} kWh</td>
             <td class="px-5 py-3 text-center">¥{{ bill.feeCharge.toFixed(2) }}</td>
             <td class="px-5 py-3 text-center">¥{{ bill.feeService.toFixed(2) }}</td>

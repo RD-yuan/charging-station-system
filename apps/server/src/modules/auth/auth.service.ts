@@ -17,7 +17,7 @@ export class AuthService {
       data: {
         username: dto.username,
         passwordHash,
-        role: (dto.role as 'USER' | 'ADMIN') ?? 'USER',
+        role: 'USER',
         batteryCapacity: dto.batteryCapacity ?? 60
       }
     })

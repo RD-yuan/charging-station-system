@@ -69,17 +69,29 @@ export class DispatchService {
       ? '/dispatch/fault-time-order'
       : '/dispatch/fault-priority'
     const affectedOrders = await this.assignedOrders(pileId)
-    const sameModePileQueues = await this.pileQueues(pile.pileType, pileId)
+    const normalQueuedOrders = strategyType === DispatchStrategyType.TIME_ORDER
+      ? await this.assignedOrdersByMode(pile.pileType, pileId)
+      : []
+    const movableOrders = strategyType === DispatchStrategyType.TIME_ORDER
+      ? [...affectedOrders, ...normalQueuedOrders]
+      : affectedOrders
+    const sameModePileQueues = strategyType === DispatchStrategyType.TIME_ORDER
+      ? await this.pileQueues(pile.pileType, pileId, [OrderStatus.CHARGING])
+      : await this.pileQueues(pile.pileType, pileId)
     const response = await this.safeSchedule(
       path,
-      { pile_id: pileId, affected_orders: affectedOrders, same_mode_pile_queues: sameModePileQueues },
+      { pile_id: pileId, affected_orders: movableOrders, same_mode_pile_queues: sameModePileQueues },
       () => strategyType === DispatchStrategyType.TIME_ORDER
-        ? localTimeOrderDispatch(affectedOrders, sameModePileQueues)
+        ? localTimeOrderDispatch(movableOrders, sameModePileQueues)
         : localBasicDispatch(affectedOrders, sameModePileQueues)
     )
-    const applied = await this.applyAssignments(response.assignments ?? [], pile.pileType)
+    const applied = await this.applyAssignments(
+      response.assignments ?? [],
+      pile.pileType,
+      movableOrders.map((order) => order.order_id)
+    )
     await this.queueCache.refreshPile(pileId)
-    this.realtime.broadcast('fault_event', { pileId, strategyType, affectedCount: affectedOrders.length, reassignedCount: applied.length })
+    this.realtime.broadcast('fault_event', { pileId, strategyType, affectedCount: movableOrders.length, reassignedCount: applied.length })
     this.realtime.broadcast('dispatch_result', { strategy: strategyType, mode: pile.pileType, applied })
     return { ...response, assignments: applied }
   }
@@ -124,14 +136,18 @@ export class DispatchService {
 
   async triggerRecoveryReschedule(pileId: string) {
     const pile = await this.prisma.chargingPile.findUniqueOrThrow({ where: { id: pileId } })
-    const sameModePileQueues = await this.pileQueues(pile.pileType)
-    const affectedOrders = sameModePileQueues.flatMap((queue) => queue.queued_orders)
+    const sameModePileQueues = await this.pileQueues(pile.pileType, undefined, [OrderStatus.CHARGING])
+    const affectedOrders = await this.assignedOrdersByMode(pile.pileType)
     const response = await this.safeSchedule(
       '/dispatch/recovery-time-order',
-      { pile_id: pileId, affected_orders: [], same_mode_pile_queues: sameModePileQueues },
-      () => localTimeOrderDispatch(affectedOrders, sameModePileQueues.map((queue) => ({ ...queue, queued_orders: [] })))
+      { pile_id: pileId, affected_orders: affectedOrders, same_mode_pile_queues: sameModePileQueues },
+      () => localTimeOrderDispatch(affectedOrders, sameModePileQueues)
     )
-    const applied = await this.applyAssignments(response.assignments ?? [], pile.pileType)
+    const applied = await this.applyAssignments(
+      response.assignments ?? [],
+      pile.pileType,
+      affectedOrders.map((order) => order.order_id)
+    )
     this.realtime.broadcast('dispatch_result', { strategy: 'RECOVERY_TIME_ORDER', mode: pile.pileType, applied })
     return { ...response, assignments: applied }
   }
@@ -167,7 +183,23 @@ export class DispatchService {
     return orders.map(toSchedulerOrder)
   }
 
-  private async pileQueues(mode?: ChargeMode, excludePileId?: string) {
+  private async assignedOrdersByMode(mode: ChargeMode, excludePileId?: string) {
+    const orders = await this.prisma.chargingOrder.findMany({
+      where: {
+        chargeMode: mode,
+        status: OrderStatus.IN_PILE_QUEUE,
+        assignedPileId: excludePileId ? { not: excludePileId } : { not: null }
+      },
+      orderBy: [{ queueNo: 'asc' }, { pileQueueEnteredAt: 'asc' }, { submitTime: 'asc' }]
+    })
+    return orders.map(toSchedulerOrder)
+  }
+
+  private async pileQueues(
+    mode?: ChargeMode,
+    excludePileId?: string,
+    orderStatuses: OrderStatus[] = [OrderStatus.CHARGING, OrderStatus.IN_PILE_QUEUE]
+  ) {
     const piles = await this.prisma.chargingPile.findMany({
       where: {
         physicalState: PhysicalState.ON,
@@ -177,8 +209,8 @@ export class DispatchService {
       },
       include: {
         orders: {
-          where: { status: { in: [OrderStatus.CHARGING, OrderStatus.IN_PILE_QUEUE] } },
-          orderBy: [{ status: 'desc' }, { pileQueueEnteredAt: 'asc' }, { submitTime: 'asc' }]
+          where: { status: { in: orderStatuses } },
+          orderBy: [{ startedAt: 'desc' }, { pileQueueEnteredAt: 'asc' }, { submitTime: 'asc' }]
         }
       },
       orderBy: { id: 'asc' }
@@ -192,10 +224,11 @@ export class DispatchService {
     }))
   }
 
-  private async applyAssignments(assignments: SchedulerAssignment[], mode?: ChargeMode) {
+  private async applyAssignments(assignments: SchedulerAssignment[], mode?: ChargeMode, movableOrderIds: string[] = []) {
     const applied: Array<{ orderId: string; queueNo: string; pileId: string; projectedFinishTime: number }> = []
     const touchedPiles = new Set<string>()
     const enteredAt = Date.now()
+    const movableSet = new Set(movableOrderIds)
 
     for (const [index, assignment] of assignments.entries()) {
       const orderId = assignment.order_id ?? assignment.orderId
@@ -208,14 +241,16 @@ export class DispatchService {
       const pile = await this.prisma.chargingPile.findUnique({ where: { id: pileId } })
       if (!pile || pile.physicalState !== PhysicalState.ON || pile.workingState === WorkingState.FAULT) continue
       if (mode && pile.pileType !== mode) continue
+      const excludedIds = Array.from(new Set([orderId, ...movableSet]))
       const queueLength = await this.prisma.chargingOrder.count({
         where: {
           assignedPileId: pileId,
           status: { in: [OrderStatus.CHARGING, OrderStatus.IN_PILE_QUEUE] },
-          id: { not: orderId }
+          id: { notIn: excludedIds }
         }
       })
-      if (queueLength >= this.pileQueueCapacity()) continue
+      const plannedForPile = applied.filter((item) => item.pileId === pileId).length
+      if (queueLength + plannedForPile >= this.pileQueueCapacity()) continue
 
       await this.prisma.chargingOrder.update({
         where: { id: orderId },
@@ -227,6 +262,7 @@ export class DispatchService {
       })
 
       touchedPiles.add(pileId)
+      if (order.assignedPileId && order.assignedPileId !== pileId) touchedPiles.add(order.assignedPileId)
       applied.push({
         orderId,
         queueNo: assignment.queue_no ?? assignment.queueNo ?? order.queueNo,

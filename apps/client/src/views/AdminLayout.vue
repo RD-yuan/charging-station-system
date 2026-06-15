@@ -12,13 +12,16 @@ type ChargeMode = 'FAST' | 'SLOW'
 type PhysicalState = 'ON' | 'OFF'
 type WorkingState = 'IDLE' | 'CHARGING' | 'FAULT'
 type SocketDirection = 'INCOMING' | 'OUTGOING' | 'SYSTEM'
+type ReportTimeType = 'DAY' | 'WEEK' | 'MONTH'
 
 interface QueueCar {
   id: string
   queueNo: string
+  status: 'IN_PILE_QUEUE' | 'CHARGING'
   progress: number
   userId: string
   amount: number
+  deliveredAmount?: number
 }
 
 interface Pile {
@@ -26,6 +29,7 @@ interface Pile {
   type: ChargeMode
   physicalState: PhysicalState
   workingState: WorkingState
+  power: number
   lastActive: string
   totalEnergy: number
   queue: QueueCar[]
@@ -44,6 +48,7 @@ interface BillingDetail {
   id: string
   pileId: string
   userId: string
+  count: number
   energy: number
   duration: number
   feeCharge: number
@@ -66,6 +71,7 @@ const piles = ref<Pile[]>([])
 const waitingQueue = ref<WaitingQueueItem[]>([])
 const billingHistory = ref<BillingDetail[]>([])
 const socketLogs = ref<SocketLog[]>([])
+const reportTimeType = ref<ReportTimeType>('DAY')
 let socket: WebSocket | null = null
 
 onMounted(() => {
@@ -90,14 +96,17 @@ async function loadPiles() {
     type: pile.type,
     physicalState: pile.physicalState,
     workingState: pile.workingState,
+    power: Number(pile.power ?? 0),
     lastActive: new Date().toLocaleTimeString(),
     totalEnergy: Number(pile.totalEnergy ?? pile.totalChargeAmount ?? 0),
     queue: (pile.queue ?? []).map((car: any) => ({
       id: car.id ?? car.orderId,
       queueNo: car.queueNo,
+      status: car.status,
       progress: Number(car.progress ?? 0),
       userId: car.username ?? car.userId,
-      amount: Number(car.amount ?? car.requestedAmount ?? 0)
+      amount: Number(car.amount ?? car.requestedAmount ?? 0),
+      deliveredAmount: Number(car.deliveredAmount ?? 0)
     }))
   }))
 }
@@ -107,13 +116,14 @@ async function loadWaitingQueue() {
 }
 
 async function loadReports() {
-  const reports = await apiRequest<Array<any>>('/admin/reports?timeType=DAY')
+  const reports = await apiRequest<Array<any>>(`/admin/reports?timeType=${reportTimeType.value}`)
   billingHistory.value = reports.map((item) => ({
     id: `REPORT-${item.timeType}-${item.pileId}`,
     pileId: item.pileId,
     userId: '汇总',
+    count: Number(item.totalChargeCount ?? 0),
     energy: Number(item.totalChargeAmount ?? 0),
-    duration: Math.round(Number(item.totalChargeDuration ?? 0) * 60),
+    duration: Number(item.totalChargeDuration ?? 0),
     feeCharge: Number(item.totalChargeFee ?? 0),
     feeService: Number(item.totalServiceFee ?? 0),
     feeTotal: Number(item.totalFee ?? 0),
@@ -140,7 +150,7 @@ function connectSocket() {
           timestamp: item.checkInTime
         }))
       }
-      if (['pile_metrics_update', 'dispatch_result', 'fault_event'].includes(message.event)) {
+      if (['pile_metrics_update', 'dispatch_result', 'fault_event', 'charging_started'].includes(message.event)) {
         void loadPiles()
         void loadWaitingQueue()
         void loadReports()
@@ -179,6 +189,11 @@ async function handleTriggerReschedule({ pileId, strategy }: { pileId: string; s
   })
   addSocketLog('OUTGOING', `管理员触发重调度：${pileId} / ${strategy}`)
   await loadAdminData()
+}
+
+async function handleReportTimeTypeChange(timeType: ReportTimeType) {
+  reportTimeType.value = timeType
+  await loadReports()
 }
 
 const handleSimulateBroadcast = ({ type, payload }: { type: string; payload: unknown }) => {
@@ -224,7 +239,12 @@ function addSocketLog(direction: SocketDirection, message: string) {
           @recover-pile="handleRecoverPile"
           @trigger-reschedule="handleTriggerReschedule"
         />
-        <ReportView v-else-if="currentTab === 'reports'" :billingHistory="billingHistory" />
+        <ReportView
+          v-else-if="currentTab === 'reports'"
+          :billingHistory="billingHistory"
+          :timeType="reportTimeType"
+          @change-time-type="handleReportTimeTypeChange"
+        />
         <WebSocketView v-else-if="currentTab === 'websocket'" :socketLogs="socketLogs" @simulate-broadcast="handleSimulateBroadcast" />
       </div>
     </main>

@@ -1,9 +1,11 @@
 import { Body, Controller, Get, Inject, Param, Post } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
+import { Roles } from '../../common/decorators/roles.decorator'
 import { DispatchStrategyType } from '../../common/enums'
 import { PileService } from './pile.service'
 
 @ApiTags('piles')
+@Roles('ADMIN')
 @Controller('admin/piles')
 export class PileController {
   constructor(@Inject(PileService) private readonly pileService: PileService) {}

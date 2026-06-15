@@ -59,9 +59,6 @@ def fault_time_order_dispatch(
     same_mode_pile_queues: list[PileQueueState],
 ) -> list[Assignment]:
     candidates = list(affected_orders)
-    for pile in same_mode_pile_queues:
-        candidates.extend(pile.queued_orders)
-        pile.queued_orders = []
     candidates.sort(key=lambda order: queue_no_number(order.queue_no))
     return basic_shortest_dispatch(candidates, same_mode_pile_queues)
 

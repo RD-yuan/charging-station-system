@@ -4,9 +4,11 @@ import { ref } from 'vue'
 interface QueueCar {
   id: string
   queueNo: string
+  status: 'IN_PILE_QUEUE' | 'CHARGING'
   progress: number
   userId: string
   amount: number
+  deliveredAmount?: number
 }
 
 interface Pile {
@@ -14,6 +16,7 @@ interface Pile {
   type: 'FAST' | 'SLOW'
   physicalState: 'ON' | 'OFF'
   workingState: 'IDLE' | 'CHARGING' | 'FAULT'
+  power: number
   lastActive: string
   totalEnergy: number
   queue: Array<QueueCar>
@@ -43,6 +46,8 @@ const handleReschedule = (pileId: string) => {
     strategy: selectedRescheduleStrategy.value
   })
 }
+
+const progressWidth = (progress: number) => `${Math.min(100, Math.max(0, progress))}%`
 </script>
 
 <template>
@@ -91,11 +96,11 @@ const handleReschedule = (pileId: string) => {
 
           <!-- Working & Physical state badges -->
           <div class="flex items-center gap-2">
-            <span v-if="pile.physicalState === 'OFF'" class="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-slate-200 text-slate-600 border border-slate-300/60">
-              已关机 (OFF)
+            <span v-if="pile.workingState === 'FAULT'" class="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200 animate-pulse">
+              {{ pile.physicalState === 'OFF' ? '故障断电 (FAULT/OFF)' : '硬件故障 (FAULT)' }}
             </span>
-            <span v-else-if="pile.workingState === 'FAULT'" class="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200 animate-pulse">
-              故障崩溃 (FAULT)
+            <span v-else-if="pile.physicalState === 'OFF'" class="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-slate-200 text-slate-600 border border-slate-300/60">
+              已关机 (OFF)
             </span>
             <span v-else-if="pile.workingState === 'CHARGING'" class="text-[10px] font-bold font-mono px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
               工作中 (CHARGING)
@@ -112,7 +117,7 @@ const handleReschedule = (pileId: string) => {
             <div>
               <p class="text-[10px] text-slate-400 font-sans font-medium uppercase">物理功率级别</p>
               <p class="text-slate-900 font-bold mt-1 text-sm">
-                {{ pile.type === 'FAST' ? '30 kW' : '7 kW' }}
+                {{ pile.power }} kW
               </p>
             </div>
             <div>
@@ -127,12 +132,12 @@ const handleReschedule = (pileId: string) => {
           <div class="pt-2">
             <p class="text-[11px] font-bold text-slate-700 mb-2">排队队列 (车位列表)</p>
             
-            <div v-if="pile.physicalState === 'OFF'" class="bg-slate-50 text-slate-400 text-center py-5 rounded-lg border border-slate-100 text-xs font-mono">
-              充电桩已关闭物理电源，不接受队列车辆。
+            <div v-if="pile.workingState === 'FAULT'" class="bg-rose-50/50 text-rose-600 text-center py-5 rounded-lg border border-rose-100 text-xs leading-relaxed font-sans px-4">
+              <p class="font-bold">该桩检测到硬件故障</p>
+              <p class="text-[10px] text-rose-500 mt-1">当前电源状态：{{ pile.physicalState }}，受影响车辆 {{ pile.queue.length }} 辆。</p>
             </div>
-            <div v-else-if="pile.workingState === 'FAULT'" class="bg-rose-50/50 text-rose-600 text-center py-5 rounded-lg border border-rose-100 text-xs leading-relaxed font-sans px-4">
-              <p class="font-bold">⚠️ 该桩检测到紧急电器故障</p>
-              <p class="text-[10px] text-rose-500 mt-1">当前队列中 {{ pile.queue.length }} 辆车受到影响，请立即重调度派车！</p>
+            <div v-else-if="pile.physicalState === 'OFF'" class="bg-slate-50 text-slate-400 text-center py-5 rounded-lg border border-slate-100 text-xs font-mono">
+              充电桩已关闭物理电源，不接受队列车辆。
             </div>
             <div v-else-if="pile.queue.length === 0" class="bg-slate-50 text-slate-400 text-center py-5 rounded-lg border border-slate-100 text-xs font-mono">
               当前车位空闲，无车辆入队列中。
@@ -150,24 +155,25 @@ const handleReschedule = (pileId: string) => {
                 <div>
                   <div class="flex items-center gap-1.5">
                     <span :class="`px-1.5 py-0.2 rounded text-[10px] font-bold ${idx === 0 ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`">
-                      {{ idx === 0 ? '首车' : `等候` }}
+                      {{ car.status === 'CHARGING' ? '充电中' : idx === 0 ? '待充首位' : '等候' }}
                     </span>
                     <span class="font-bold text-slate-900">{{ car.queueNo }}</span>
                     <span class="text-slate-400 font-sans">({{ car.userId }})</span>
                   </div>
                   <div class="mt-1 text-[10px] text-slate-500 font-sans">
-                     请求电量及车辆总空间: {{ car.amount }} kWh
+                     请求电量: {{ car.amount }} kWh
+                     <span v-if="car.status === 'CHARGING'" class="ml-2 text-emerald-600">已充 {{ (car.deliveredAmount ?? 0).toFixed(3) }} kWh</span>
                   </div>
                 </div>
 
                 <!-- Live progress meter for first car -->
-                <div v-if="idx === 0 && pile.workingState === 'CHARGING'" class="w-full sm:w-32">
+                <div v-if="car.status === 'CHARGING'" class="w-full sm:w-32">
                   <div class="flex justify-between text-[9px] text-slate-500 mb-0.5">
                     <span>充能百分比</span>
                     <span class="text-emerald-600 font-bold">{{ Math.round(car.progress) }}%</span>
                   </div>
                   <div class="w-full bg-slate-200/80 rounded-full h-1.5 overflow-hidden">
-                    <div class="bg-emerald-500 h-1.5 rounded-full transition-all duration-300" :style="`width: ${car.progress}%`"></div>
+                    <div class="bg-emerald-500 h-1.5 rounded-full transition-all duration-300" :style="{ width: progressWidth(car.progress) }"></div>
                   </div>
                 </div>
                 <div v-else class="text-[10px] text-slate-400 font-sans font-medium">

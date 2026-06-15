@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common'
-import { ChargeMode, OrderStatus, PhysicalState, WorkingState } from '@prisma/client'
+import { OrderStatus, PhysicalState, WorkingState } from '@prisma/client'
 import { DispatchStrategyType } from '../../common/enums'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RealtimeService } from '../../realtime/realtime.service'
@@ -23,8 +23,15 @@ export class PileService {
       include: {
         orders: {
           where: { status: { in: [OrderStatus.CHARGING, OrderStatus.IN_PILE_QUEUE] } },
-          include: { user: true },
-          orderBy: [{ status: 'desc' }, { pileQueueEnteredAt: 'asc' }, { submitTime: 'asc' }]
+          include: {
+            user: true,
+            sessions: {
+              where: { sessionStatus: 'ACTIVE' },
+              orderBy: { startTime: 'desc' },
+              take: 1
+            }
+          },
+          orderBy: [{ startedAt: 'desc' }, { pileQueueEnteredAt: 'asc' }, { submitTime: 'asc' }]
         }
       }
     })
@@ -40,27 +47,41 @@ export class PileService {
       totalChargeDuration: pile.totalChargeDuration,
       totalChargeAmount: pile.totalChargeAmount,
       totalEnergy: pile.totalChargeAmount,
-      queue: pile.orders.map((order) => ({
-        id: order.id,
-        orderId: order.id,
-        queueNo: order.queueNo,
-        status: order.status,
-        progress: order.status === OrderStatus.CHARGING ? 50 : 0,
-        userId: order.userId,
-        username: order.user.username,
-        batteryCapacity: order.user.batteryCapacity,
-        amount: order.requestedAmount,
-        requestedAmount: order.requestedAmount,
-        waitMinutes: Math.max(0, Math.round((Date.now() - order.submitTime.getTime()) / 60_000))
-      }))
+      queue: pile.orders.map((order) => {
+        const progress = chargingProgress(order, pile.power)
+        return {
+          id: order.id,
+          orderId: order.id,
+          queueNo: order.queueNo,
+          status: order.status,
+          progress,
+          userId: order.userId,
+          username: order.user.username,
+          batteryCapacity: order.user.batteryCapacity,
+          amount: order.requestedAmount,
+          requestedAmount: order.requestedAmount,
+          activeSessionId: order.sessions[0]?.id ?? null,
+          startedAt: order.startedAt,
+          deliveredAmount: deliveredAmount(order, pile.power),
+          waitMinutes: Math.max(0, Math.round((Date.now() - order.submitTime.getTime()) / 60_000))
+        }
+      })
     }))
   }
 
   queue(pileId: string) {
     return this.prisma.chargingOrder.findMany({
       where: { assignedPileId: pileId, status: { in: [OrderStatus.IN_PILE_QUEUE, OrderStatus.CHARGING] } },
-      orderBy: [{ status: 'desc' }, { pileQueueEnteredAt: 'asc' }, { submitTime: 'asc' }],
-      include: { user: true }
+      orderBy: [{ startedAt: 'desc' }, { pileQueueEnteredAt: 'asc' }, { submitTime: 'asc' }],
+      include: {
+        user: true,
+        sessions: {
+          where: { sessionStatus: 'ACTIVE' },
+          orderBy: { startTime: 'desc' },
+          take: 1
+        },
+        assignedPile: true
+      }
     }).then((orders) =>
       orders.map((order) => ({
         orderId: order.id,
@@ -69,30 +90,40 @@ export class PileService {
         userId: order.userId,
         batteryCapacity: order.user.batteryCapacity,
         requestedAmount: order.requestedAmount,
+        progress: chargingProgress(order, order.assignedPile?.power ?? 0),
+        activeSessionId: order.sessions[0]?.id ?? null,
         waitMinutes: Math.max(0, Math.round((Date.now() - order.submitTime.getTime()) / 60_000))
       }))
     )
   }
 
   async powerOn(pileId: string) {
+    const current = await this.prisma.chargingPile.findUniqueOrThrow({ where: { id: pileId } })
+    const nextWorkingState = current.workingState === WorkingState.FAULT
+      ? WorkingState.FAULT
+      : WorkingState.IDLE
     const pile = await this.prisma.chargingPile.update({
       where: { id: pileId },
-      data: { physicalState: PhysicalState.ON, workingState: WorkingState.IDLE }
+      data: { physicalState: PhysicalState.ON, workingState: nextWorkingState }
     })
     await this.queueCache.refreshPile(pileId)
-    await this.dispatchService.triggerBasic(pile.pileType)
+    if (pile.workingState !== WorkingState.FAULT) await this.dispatchService.triggerBasic(pile.pileType)
     return pile
   }
 
   async powerOff(pileId: string) {
+    const current = await this.prisma.chargingPile.findUniqueOrThrow({ where: { id: pileId } })
     const active = await this.prisma.chargingOrder.findFirst({
       where: { assignedPileId: pileId, status: OrderStatus.CHARGING }
     })
     if (active) throw new BadRequestException('Cannot power off a pile while it is charging.')
 
+    const nextWorkingState = current.workingState === WorkingState.FAULT
+      ? WorkingState.FAULT
+      : WorkingState.IDLE
     const pile = await this.prisma.chargingPile.update({
       where: { id: pileId },
-      data: { physicalState: PhysicalState.OFF, workingState: WorkingState.IDLE }
+      data: { physicalState: PhysicalState.OFF, workingState: nextWorkingState }
     })
     await this.queueCache.refreshPile(pileId)
     return pile
@@ -103,10 +134,9 @@ export class PileService {
     const active = await this.prisma.chargingOrder.findFirst({
       where: { assignedPileId: pileId, status: OrderStatus.CHARGING }
     })
-    let detail: unknown = null
-    if (active) {
-      detail = await this.billingService.closeAndBill(active.id, 'FAULT', OrderStatus.ABORTED, WorkingState.FAULT)
-    }
+    const detail = active
+      ? await this.billingService.closeAndBill(active.id, 'FAULT', OrderStatus.ABORTED, WorkingState.FAULT)
+      : null
 
     const updated = await this.prisma.chargingPile.update({
       where: { id: pileId },
@@ -115,6 +145,7 @@ export class PileService {
     const affectedCount = await this.prisma.chargingOrder.count({
       where: { assignedPileId: pileId, status: OrderStatus.IN_PILE_QUEUE }
     })
+
     await this.queueCache.refreshPile(pileId)
     this.realtime.broadcast('fault_event', {
       pileId,
@@ -135,8 +166,10 @@ export class PileService {
       data: { workingState: WorkingState.IDLE }
     })
     await this.queueCache.refreshPile(pileId)
-    await this.dispatchService.triggerRecoveryReschedule(pileId)
-    await this.dispatchService.triggerBasic(pile.pileType)
+    if (pile.physicalState === PhysicalState.ON) {
+      await this.dispatchService.triggerRecoveryReschedule(pileId)
+      await this.dispatchService.triggerBasic(pile.pileType)
+    }
     return pile
   }
 
@@ -149,4 +182,32 @@ export class PileService {
     if (action === 'RECOVER_PILE' || targetState === WorkingState.IDLE) return this.recover(pileId)
     throw new BadRequestException(`Unsupported pile control action: ${action}`)
   }
+}
+
+function chargingProgress(
+  order: {
+    status: OrderStatus
+    requestedAmount: number
+    sessions: Array<{ startTime: Date }>
+  },
+  pilePower: number
+) {
+  if (order.status !== OrderStatus.CHARGING || order.requestedAmount <= 0 || pilePower <= 0) return 0
+  const session = order.sessions[0]
+  if (!session) return 0
+  return Math.min(100, Math.round((deliveredAmount(order, pilePower) / order.requestedAmount) * 1000) / 10)
+}
+
+function deliveredAmount(
+  order: {
+    status: OrderStatus
+    sessions: Array<{ startTime: Date }>
+  },
+  pilePower: number
+) {
+  if (order.status !== OrderStatus.CHARGING || pilePower <= 0) return 0
+  const session = order.sessions[0]
+  if (!session) return 0
+  const elapsedHours = Math.max(0, (Date.now() - session.startTime.getTime()) / 3_600_000)
+  return Math.round(elapsedHours * pilePower * 10_000) / 10_000
 }

@@ -1,10 +1,12 @@
 import { Body, Controller, Inject, Param, Post } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
 import { ChargeMode } from '@prisma/client'
+import { Roles } from '../../common/decorators/roles.decorator'
 import { DispatchStrategyType } from '../../common/enums'
 import { DispatchService } from './dispatch.service'
 
 @ApiTags('dispatch')
+@Roles('ADMIN')
 @Controller('dispatch')
 export class DispatchController {
   constructor(@Inject(DispatchService) private readonly dispatchService: DispatchService) {}
@@ -31,6 +33,7 @@ export class DispatchController {
 }
 
 @ApiTags('admin optimization')
+@Roles('ADMIN')
 @Controller('admin/optimization')
 export class AdminOptimizationController {
   constructor(@Inject(DispatchService) private readonly dispatchService: DispatchService) {}

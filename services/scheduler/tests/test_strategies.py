@@ -49,6 +49,32 @@ def test_fault_time_order_keeps_original_queue_numbers():
     assert [item.queue_no for item in result] == ["F1", "F3"]
 
 
+def test_fault_time_order_does_not_reassign_fixed_charging_orders():
+    affected = [
+        CarOrder(order_id="faulted", queue_no="F3", charge_mode=ChargeMode.FAST, requested_amount=10),
+    ]
+    active = CarOrder(
+        order_id="active",
+        queue_no="F1",
+        charge_mode=ChargeMode.FAST,
+        requested_amount=30,
+    )
+    piles = [
+        PileQueueState(
+            pile_id="F01",
+            pile_type=ChargeMode.FAST,
+            power=30,
+            queued_orders=[active],
+        ),
+        PileQueueState(pile_id="F02", pile_type=ChargeMode.FAST, power=30),
+    ]
+
+    result = fault_time_order_dispatch(affected, piles)
+
+    assert [item.order_id for item in result] == ["faulted"]
+    assert piles[0].queued_orders == [active]
+
+
 def test_batch_optimization_does_not_require_mode():
     orders = [
         CarOrder(order_id="f1", queue_no="F1", charge_mode=ChargeMode.FAST, requested_amount=30),
