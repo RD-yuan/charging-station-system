@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { ChargeMode, OrderStatus, PhysicalState, WorkingState } from '@prisma/client'
+import { virtualNowMs } from '../../common/clock'
 import { PrismaService } from '../../prisma/prisma.service'
 import { BillingService } from '../billing/billing.service'
 import { DispatchService } from '../dispatch/dispatch.service'
@@ -28,19 +29,28 @@ export class ChargingService {
     await this.ensureUserCanSubmit(uid)
     await this.ensureWaitingCapacity()
 
-    const queueNo = await this.nextQueueNo(dto.chargeMode)
-    const order = await this.prisma.chargingOrder.create({
-      data: {
-        userId: uid,
-        chargeMode: dto.chargeMode,
-        requestedAmount: dto.requestedAmount,
-        queueNo,
-        status: OrderStatus.WAITING
+    // 带重试的订单创建，防止并发 queueNo 冲突
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const queueNo = await this.nextQueueNo(dto.chargeMode)
+      try {
+        const order = await this.prisma.chargingOrder.create({
+          data: {
+            userId: uid,
+            chargeMode: dto.chargeMode,
+            requestedAmount: dto.requestedAmount,
+            queueNo,
+            status: OrderStatus.WAITING
+          }
+        })
+        await this.queueCache.refreshMode(dto.chargeMode)
+        await this.dispatchService.triggerBasic(dto.chargeMode)
+        return this.queueStatus(order.id)
+      } catch (err) {
+        // unique 冲突时重试，其他错误直接抛出
+        if (attempt === 2 || !isUniqueConstraintError(err)) throw err
       }
-    })
-    await this.queueCache.refreshMode(dto.chargeMode)
-    await this.dispatchService.triggerBasic(dto.chargeMode)
-    return this.queueStatus(order.id)
+    }
+    throw new BadRequestException('Failed to create order after retries.')
   }
 
   async modifyMode(orderId: string, dto: ModifyModeDto, userId?: string) {
@@ -85,6 +95,7 @@ export class ChargingService {
         }
       })
       await this.queueCache.refreshMode(order.chargeMode)
+      await this.dispatchService.triggerBasic(order.chargeMode)
       return this.toQueueStatus(updated, 'WAITING')
     }
     if (order.status === OrderStatus.IN_PILE_QUEUE) {
@@ -103,8 +114,8 @@ export class ChargingService {
       return this.toQueueStatus(updated, 'PILE_QUEUE')
     }
     if (order.status === OrderStatus.CHARGING) {
-      const targetStatus = dto.reason === 'USER_STOP' || !dto.reason ? OrderStatus.FINISHED : OrderStatus.ABORTED
-      const detail = await this.billingService.closeAndBill(orderId, dto.reason ?? 'USER_STOP', targetStatus)
+      const targetStatus = dto.reason === 'USER_STOP' ? OrderStatus.FINISHED : OrderStatus.ABORTED
+      const detail = await this.billingService.closeAndBill(orderId, dto.reason ?? 'FAULT', targetStatus)
       await this.dispatchService.triggerBasic(order.chargeMode)
       return detail
     }
@@ -125,6 +136,7 @@ export class ChargingService {
     })
 
     return orders.map((order) => {
+      const isTerminalWithoutDetail = (order.status === OrderStatus.CANCELED || order.status === OrderStatus.ABORTED) && !order.detail
       const detail = order.detail
         ? {
             detailId: order.detail.id,
@@ -142,6 +154,24 @@ export class ChargingService {
             chargeFee: order.detail.chargeFee,
             serviceFee: order.detail.serviceFee,
             totalFee: order.detail.totalFee
+          }
+        : isTerminalWithoutDetail
+        ? {
+            detailId: `cancel-${order.id}`,
+            orderId: order.id,
+            sessionId: null,
+            queueNo: order.queueNo,
+            userId: order.userId,
+            status: order.status,
+            pileId: order.assignedPileId,
+            generatedAt: order.finishedAt ?? order.createdAt,
+            startTime: null,
+            stopTime: order.finishedAt,
+            actualAmount: 0,
+            duration: 0,
+            chargeFee: 0,
+            serviceFee: 0,
+            totalFee: 0
           }
         : null
 
@@ -164,6 +194,7 @@ export class ChargingService {
 
   async queueStatus(orderId: string, userId?: string) {
     await this.ensureOrderOwner(orderId, userId)
+    await this.dispatchService.autoCompleteCharging()
     const order = await this.prisma.chargingOrder.findUniqueOrThrow({
       where: { id: orderId },
       include: { assignedPile: true }
@@ -187,31 +218,33 @@ export class ChargingService {
       throw new BadRequestException('Assigned pile is not available.')
     }
 
-    const earlier = await this.prisma.chargingOrder.findFirst({
-      where: {
-        assignedPileId: order.assignedPileId,
-        status: OrderStatus.IN_PILE_QUEUE,
-        id: { not: order.id },
-        OR: [
-          { pileQueueEnteredAt: { lt: order.pileQueueEnteredAt ?? order.submitTime } },
-          { pileQueueEnteredAt: null, submitTime: { lt: order.submitTime } }
-        ]
-      },
-      orderBy: [{ pileQueueEnteredAt: 'asc' }, { submitTime: 'asc' }]
-    })
-    if (earlier) throw new BadRequestException('Order is not at the head of its pile queue.')
-
     const session = await this.prisma.$transaction(async (tx) => {
+      // 队首检查在事务内，防止 TOCTOU
+      const earlier = await tx.chargingOrder.findFirst({
+        where: {
+          assignedPileId: order.assignedPileId!,
+          status: OrderStatus.IN_PILE_QUEUE,
+          id: { not: order.id },
+          OR: [
+            { pileQueueEnteredAt: { lt: order.pileQueueEnteredAt ?? order.submitTime } },
+            { pileQueueEnteredAt: null, submitTime: { lt: order.submitTime } }
+          ]
+        },
+        orderBy: [{ pileQueueEnteredAt: 'asc' }, { submitTime: 'asc' }]
+      })
+      if (earlier) throw new BadRequestException('Order is not at the head of its pile queue.')
+
+      const vNow = new Date(virtualNowMs())
       await tx.chargingOrder.update({
         where: { id: order.id },
-        data: { status: OrderStatus.CHARGING, startedAt: new Date() }
+        data: { status: OrderStatus.CHARGING, startedAt: vNow }
       })
       await tx.chargingPile.update({
         where: { id: order.assignedPileId! },
         data: { workingState: WorkingState.CHARGING }
       })
       return tx.chargingSession.create({
-        data: { orderId: order.id, pileId: order.assignedPileId! }
+        data: { orderId: order.id, pileId: order.assignedPileId!, startTime: vNow }
       })
     })
 
@@ -349,4 +382,8 @@ export class ChargingService {
       estimatedWaitTime
     }
   }
+}
+
+function isUniqueConstraintError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && 'code' in err && (err as Record<string, unknown>).code === 'P2002'
 }

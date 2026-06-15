@@ -22,16 +22,28 @@ interface Pile {
   queue: Array<QueueCar>
 }
 
-defineProps<{
+const props = defineProps<{
   piles: Array<Pile>
+  affectedOrderIds?: Set<string>
+  faultedPileId?: string | null
 }>()
 
 const emit = defineEmits([
   'toggle-power',
   'report-fault',
   'recover-pile',
-  'trigger-reschedule'
+  'trigger-reschedule',
+  'single-optimization',
+  'batch-optimization'
 ])
+
+const singleMode = ref<'FAST' | 'SLOW'>('FAST')
+const singleSpots = ref(3)
+const batchSpots = ref(5)
+
+function isAffected(orderId: string) {
+  return props.affectedOrderIds?.has(orderId) ?? false
+}
 
 const activePivotPileId = ref<string | null>(null)
 const selectedRescheduleStrategy = ref<string>('TIME_ORDER')
@@ -67,6 +79,47 @@ const progressWidth = (progress: number) => `${Math.min(100, Math.max(0, progres
           <option value="TIME_ORDER">按原登记排队号顺序重排 (推荐)</option>
           <option value="PRIORITY_QUEUE">高优先级紧急车队最前列排定</option>
         </select>
+      </div>
+    </div>
+
+    <!-- 最优时长调度面板 -->
+    <div class="bg-white border border-slate-200 rounded-xl p-5">
+      <h3 class="text-xs font-bold text-slate-900 uppercase tracking-wider mb-4">最优时长调度</h3>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- 单次最优 -->
+        <div class="bg-slate-50 rounded-lg p-4 border border-slate-100">
+          <p class="text-[11px] font-bold text-slate-700 mb-3">单次最优调度（按模式）</p>
+          <div class="flex items-center gap-2 mb-2">
+            <label class="text-[10px] text-slate-500 shrink-0">模式</label>
+            <select v-model="singleMode" class="bg-white border border-slate-200 rounded text-xs px-2 py-1 font-mono">
+              <option value="FAST">FAST 快充</option>
+              <option value="SLOW">SLOW 慢充</option>
+            </select>
+            <label class="text-[10px] text-slate-500 shrink-0 ml-2">名额</label>
+            <input v-model.number="singleSpots" type="number" min="1" max="50" class="w-14 bg-white border border-slate-200 rounded text-xs px-2 py-1 font-mono text-center" />
+          </div>
+          <button
+            @click="emit('single-optimization', { spotsCount: singleSpots, mode: singleMode })"
+            class="w-full mt-2 py-2 rounded-lg text-[10px] font-bold bg-emerald-500 text-slate-950 hover:bg-emerald-400 transition-all"
+          >
+            执行单次最优调度
+          </button>
+        </div>
+        <!-- 批量最优 -->
+        <div class="bg-slate-50 rounded-lg p-4 border border-slate-100">
+          <p class="text-[11px] font-bold text-slate-700 mb-3">批量最优调度（全局，不区分快慢充）</p>
+          <div class="flex items-center gap-2 mb-2">
+            <label class="text-[10px] text-slate-500 shrink-0">调度名额</label>
+            <input v-model.number="batchSpots" type="number" min="1" max="50" class="w-14 bg-white border border-slate-200 rounded text-xs px-2 py-1 font-mono text-center" />
+            <span class="text-[10px] text-slate-400">辆（按请求电量降序）</span>
+          </div>
+          <button
+            @click="emit('batch-optimization', { spotsCount: batchSpots })"
+            class="w-full mt-2 py-2 rounded-lg text-[10px] font-bold bg-amber-500 text-slate-950 hover:bg-amber-400 transition-all"
+          >
+            执行批量最优调度
+          </button>
+        </div>
       </div>
     </div>
 
@@ -143,12 +196,14 @@ const progressWidth = (progress: number) => `${Math.min(100, Math.max(0, progres
               当前车位空闲，无车辆入队列中。
             </div>
             <div v-else class="space-y-2">
-              <div 
-                v-for="(car, idx) in pile.queue" 
+              <div
+                v-for="(car, idx) in pile.queue"
                 :key="car.id"
                 :class="`p-3 rounded-lg border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-mono ${
-                  idx === 0 
-                    ? 'bg-emerald-50/40 border-emerald-100/80 shadow-xs' 
+                  isAffected(car.id)
+                    ? 'bg-amber-50/80 border-amber-300 shadow-amber-100/50 ring-1 ring-amber-400/30'
+                    : idx === 0
+                    ? 'bg-emerald-50/40 border-emerald-100/80 shadow-xs'
                     : 'bg-slate-50/50 border-slate-150'
                 }`"
               >
@@ -163,6 +218,7 @@ const progressWidth = (progress: number) => `${Math.min(100, Math.max(0, progres
                   <div class="mt-1 text-[10px] text-slate-500 font-sans">
                      请求电量: {{ car.amount }} kWh
                      <span v-if="car.status === 'CHARGING'" class="ml-2 text-emerald-600">已充 {{ (car.deliveredAmount ?? 0).toFixed(3) }} kWh</span>
+                     <span v-if="isAffected(car.id)" class="ml-2 text-amber-600 font-bold animate-pulse">⚠ 受故障影响，等待重调度</span>
                   </div>
                 </div>
 

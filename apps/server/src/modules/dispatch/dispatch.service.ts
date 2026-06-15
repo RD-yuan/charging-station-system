@@ -1,9 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { ChargeMode, OrderStatus, PhysicalState, WorkingState } from '@prisma/client'
+import { virtualNowMs } from '../../common/clock'
 import { DispatchStrategyType } from '../../common/enums'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RealtimeService } from '../../realtime/realtime.service'
+import { BillingService } from '../billing/billing.service'
 import { QueueCacheService } from '../queue/queue-cache.service'
 import { HttpSchedulerClient } from './http-scheduler.client'
 
@@ -47,10 +49,13 @@ export class DispatchService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(QueueCacheService) private readonly queueCache: QueueCacheService,
     @Inject(RealtimeService) private readonly realtime: RealtimeService,
-    @Inject(ConfigService) private readonly config: ConfigService
+    @Inject(ConfigService) private readonly config: ConfigService,
+    @Inject(BillingService) private readonly billingService: BillingService
   ) {}
 
   async triggerBasic(mode: ChargeMode | string) {
+    // 先自动结束所有已充满的订单，释放桩位
+    await this.autoCompleteCharging()
     const chargeMode = mode as ChargeMode
     const waitingOrders = await this.waitingOrders(chargeMode)
     const pileQueues = await this.pileQueues(chargeMode)
@@ -225,8 +230,9 @@ export class DispatchService {
   }
 
   private async applyAssignments(assignments: SchedulerAssignment[], mode?: ChargeMode, movableOrderIds: string[] = []) {
-    const applied: Array<{ orderId: string; queueNo: string; pileId: string; projectedFinishTime: number }> = []
+    const applied: Array<{ orderId: string; queueNo: string; pileId: string; projectedFinishTime: number; autoStarted: boolean }> = []
     const touchedPiles = new Set<string>()
+    const autoStartedPiles = new Set<string>()
     const enteredAt = Date.now()
     const movableSet = new Set(movableOrderIds)
 
@@ -252,12 +258,26 @@ export class DispatchService {
       const plannedForPile = applied.filter((item) => item.pileId === pileId).length
       if (queueLength + plannedForPile >= this.pileQueueCapacity()) continue
 
-      await this.prisma.chargingOrder.update({
-        where: { id: orderId },
-        data: {
-          status: OrderStatus.IN_PILE_QUEUE,
-          assignedPileId: pileId,
-          pileQueueEnteredAt: new Date(enteredAt + index)
+      // 桩空闲且本批次未在此桩自动启动过 → 直接开始充电
+      const shouldAutoStart = pile.workingState === WorkingState.IDLE && !autoStartedPiles.has(pileId)
+      const vNow = virtualNowMs()
+
+      await this.prisma.$transaction(async (tx) => {
+        await tx.chargingOrder.update({
+          where: { id: orderId },
+          data: shouldAutoStart
+            ? { status: OrderStatus.CHARGING, assignedPileId: pileId, startedAt: new Date(vNow), pileQueueEnteredAt: new Date(enteredAt + index) }
+            : { status: OrderStatus.IN_PILE_QUEUE, assignedPileId: pileId, pileQueueEnteredAt: new Date(enteredAt + index) }
+        })
+        if (shouldAutoStart) {
+          await tx.chargingPile.update({
+            where: { id: pileId },
+            data: { workingState: WorkingState.CHARGING }
+          })
+          await tx.chargingSession.create({
+            data: { orderId, pileId, startTime: new Date(vNow) }
+          })
+          autoStartedPiles.add(pileId)
         }
       })
 
@@ -267,12 +287,48 @@ export class DispatchService {
         orderId,
         queueNo: assignment.queue_no ?? assignment.queueNo ?? order.queueNo,
         pileId,
-        projectedFinishTime: assignment.projected_finish_time ?? assignment.projectedFinishTime ?? 0
+        projectedFinishTime: assignment.projected_finish_time ?? assignment.projectedFinishTime ?? 0,
+        autoStarted: shouldAutoStart
       })
     }
 
     await Promise.all([...touchedPiles].map((pileId) => this.queueCache.refreshPile(pileId)))
     return applied
+  }
+
+  async autoCompleteCharging() {
+    const orders = await this.prisma.chargingOrder.findMany({
+      where: { status: OrderStatus.CHARGING },
+      include: {
+        sessions: {
+          where: { sessionStatus: 'ACTIVE' },
+          include: { pile: true },
+          take: 1
+        },
+        assignedPile: true
+      }
+    })
+
+    const now = virtualNowMs()
+    for (const order of orders) {
+      const session = order.sessions[0]
+      const pile = order.assignedPile
+      if (!session || !pile || pile.power <= 0) continue
+
+      const elapsedHours = Math.max(0, (now - session.startTime.getTime()) / 3_600_000)
+      const delivered = elapsedHours * pile.power
+
+      if (delivered >= order.requestedAmount) {
+        try {
+          await this.billingService.closeAndBill(order.id, 'CHARGE_COMPLETE', OrderStatus.FINISHED, WorkingState.IDLE)
+          await this.queueCache.refreshPile(pile.id)
+          await this.queueCache.refreshMode(order.chargeMode)
+          this.realtime.broadcast('charging_complete', { orderId: order.id, pileId: pile.id })
+        } catch {
+          // 自动结束失败不阻塞调度
+        }
+      }
+    }
   }
 
   private pileQueueCapacity() {

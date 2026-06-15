@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common'
 import { ChargeMode, OrderStatus } from '@prisma/client'
+import { chargingProgress } from '../../common/charging'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RedisService } from '../../redis/redis.service'
 import { RealtimeService } from '../../realtime/realtime.service'
@@ -93,20 +94,4 @@ export class QueueCacheService {
     await Promise.all(piles.map((pile) => this.refreshPile(pile.id, broadcast)))
     return { waiting: modes.flat(), piles: piles.length }
   }
-}
-
-function chargingProgress(
-  order: {
-    status: OrderStatus
-    requestedAmount: number
-    sessions: Array<{ startTime: Date }>
-  },
-  pilePower: number
-) {
-  if (order.status !== OrderStatus.CHARGING || order.requestedAmount <= 0 || pilePower <= 0) return 0
-  const session = order.sessions[0]
-  if (!session) return 0
-  const elapsedHours = Math.max(0, (Date.now() - session.startTime.getTime()) / 3_600_000)
-  const delivered = elapsedHours * pilePower
-  return Math.min(100, Math.round((delivered / order.requestedAmount) * 1000) / 10)
 }

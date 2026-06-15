@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 
 const props = defineProps<{
   piles: Array<{
@@ -20,34 +20,37 @@ const props = defineProps<{
     queueNo: string
     timestamp: string
   }>
+  clockSpeed?: number
 }>()
 
-// Dynamic System Clock: Starts at 10:11 and simulates 1:10 rate (1 real second = 10 sim seconds)
-const simTime = ref('10:11:00')
-let hour = 10
-let minute = 11
-let second = 0
-let clockInterval: any = null
+// 虚拟时钟：从当前真实时间起步，按 clockSpeed 倍率推进
+const simTime = ref('')
+let clockBaseReal = Date.now()
+let clockBaseVirtual = Date.now()
+let clockInterval: ReturnType<typeof setInterval> | null = null
+
+function updateSimTime() {
+  const realElapsed = Date.now() - clockBaseReal
+  const virtualMs = clockBaseVirtual + realElapsed * (props.clockSpeed ?? 1)
+  const d = new Date(virtualMs)
+  simTime.value = [
+    String(d.getHours()).padStart(2, '0'),
+    String(d.getMinutes()).padStart(2, '0'),
+    String(d.getSeconds()).padStart(2, '0'),
+  ].join(':')
+}
 
 onMounted(() => {
-  clockInterval = setInterval(() => {
-    second += 10
-    if (second >= 60) {
-      minute += Math.floor(second / 60)
-      second %= 60
-    }
-    if (minute >= 60) {
-      hour += Math.floor(minute / 60)
-      minute %= 60
-    }
-    if (hour >= 24) {
-      hour %= 24
-    }
-    const hStr = String(hour).padStart(2, '0')
-    const mStr = String(minute).padStart(2, '0')
-    const sStr = String(second).padStart(2, '0')
-    simTime.value = `${hStr}:${mStr}:${sStr}`
-  }, 1000)
+  clockBaseReal = Date.now()
+  clockBaseVirtual = Date.now()
+  updateSimTime()
+  clockInterval = setInterval(updateSimTime, 200)
+})
+
+// 时钟流速变化时从当前真实时间重新起步
+watch(() => props.clockSpeed, () => {
+  clockBaseReal = Date.now()
+  clockBaseVirtual = Date.now()
 })
 
 onUnmounted(() => {
@@ -90,7 +93,7 @@ const slowPilesCount = computed(() => {
       </div>
       <div class="flex items-center gap-2 text-xs font-mono bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
         <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-        <span class="text-slate-600 font-medium">系统时钟: {{ simTime }} (演示速率 1:10)</span>
+        <span class="text-slate-600 font-medium">系统时钟: {{ simTime }} (速率 {{ (clockSpeed ?? 1).toFixed(1) }}×)</span>
       </div>
     </div>
 

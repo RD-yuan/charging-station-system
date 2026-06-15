@@ -72,12 +72,17 @@ const waitingQueue = ref<WaitingQueueItem[]>([])
 const billingHistory = ref<BillingDetail[]>([])
 const socketLogs = ref<SocketLog[]>([])
 const reportTimeType = ref<ReportTimeType>('DAY')
+const affectedOrderIds = ref<Set<string>>(new Set())
+const faultedPileId = ref<string | null>(null)
+const clockSpeed = ref(1)
+const clockSpeeds = [0.5, 1, 2, 5, 10, 20, 50]
 let socket: WebSocket | null = null
 
 onMounted(() => {
   document.title = '智能充电桩 - 调度与计费管理后台'
   adminName.value = localStorage.getItem('admin_name') ?? '超级管理员'
   void loadAdminData()
+  void loadClockSpeed()
   connectSocket()
 })
 
@@ -150,7 +155,21 @@ function connectSocket() {
           timestamp: item.checkInTime
         }))
       }
-      if (['pile_metrics_update', 'dispatch_result', 'fault_event', 'charging_started'].includes(message.event)) {
+      if (message.event === 'fault_event') {
+        faultedPileId.value = message.data.pileId ?? null
+        if (message.data.affectedOrders) {
+          const ids: string[] = message.data.affectedOrders.map((o: any) => o.orderId)
+          affectedOrderIds.value = new Set(ids)
+        }
+        void loadPiles()
+        void loadWaitingQueue()
+        void loadReports()
+      }
+      if (['pile_metrics_update', 'dispatch_result', 'charging_started'].includes(message.event)) {
+        if (message.event === 'dispatch_result') {
+          affectedOrderIds.value = new Set()
+          faultedPileId.value = null
+        }
         void loadPiles()
         void loadWaitingQueue()
         void loadReports()
@@ -196,6 +215,24 @@ async function handleReportTimeTypeChange(timeType: ReportTimeType) {
   await loadReports()
 }
 
+async function handleSingleOptimization({ spotsCount, mode }: { spotsCount: number; mode: string }) {
+  await apiRequest('/admin/optimization/single', {
+    method: 'POST',
+    body: JSON.stringify({ spotsCount, mode })
+  })
+  addSocketLog('OUTGOING', `单次最优调度: ${mode} ${spotsCount}辆`)
+  await loadAdminData()
+}
+
+async function handleBatchOptimization({ spotsCount }: { spotsCount: number }) {
+  await apiRequest('/admin/optimization/batch', {
+    method: 'POST',
+    body: JSON.stringify({ spotsCount })
+  })
+  addSocketLog('OUTGOING', `批量最优调度: ${spotsCount}辆`)
+  await loadAdminData()
+}
+
 const handleSimulateBroadcast = ({ type, payload }: { type: string; payload: unknown }) => {
   addSocketLog('INCOMING', `[模拟广播注入] ${type}: ${JSON.stringify(payload)}`)
 }
@@ -217,6 +254,24 @@ function addSocketLog(direction: SocketDirection, message: string) {
     timestamp: new Date().toLocaleTimeString()
   })
 }
+
+async function loadClockSpeed() {
+  try {
+    const data = await apiRequest<{ speed: number }>('/admin/clock-speed')
+    clockSpeed.value = data.speed
+  } catch {
+    clockSpeed.value = 1
+  }
+}
+
+async function setClockSpeedAction(speed: number) {
+  clockSpeed.value = speed
+  try {
+    await apiRequest('/admin/clock-speed', { method: 'POST', body: JSON.stringify({ speed }) })
+  } catch {
+    // 静默失败
+  }
+}
 </script>
 
 <template>
@@ -229,15 +284,38 @@ function addSocketLog(direction: SocketDirection, message: string) {
     />
 
     <main class="flex-1 overflow-y-auto p-6 md:p-8 bg-slate-50">
+      <!-- 时钟流速控制条 -->
+      <div class="max-w-7xl mx-auto mb-4 bg-white border border-slate-200 rounded-lg px-4 py-2 flex items-center gap-3">
+        <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider shrink-0">系统时钟</span>
+        <div class="flex gap-1">
+          <button
+            v-for="s in clockSpeeds"
+            :key="s"
+            @click="setClockSpeedAction(s)"
+            :class="`px-2 py-0.5 rounded text-[10px] font-bold font-mono border transition-all ${
+              clockSpeed === s
+                ? 'bg-emerald-500 text-slate-950 border-emerald-500'
+                : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+            }`"
+          >
+            {{ s }}×
+          </button>
+        </div>
+        <span class="text-[10px] text-slate-400 ml-auto">当前 {{ clockSpeed }}× 流速</span>
+      </div>
       <div class="max-w-7xl mx-auto space-y-6">
-        <DashboardView v-if="currentTab === 'dashboard'" :piles="piles" :waitingQueue="waitingQueue" />
+        <DashboardView v-if="currentTab === 'dashboard'" :piles="piles" :waitingQueue="waitingQueue" :clockSpeed="clockSpeed" />
         <MonitorView
           v-else-if="currentTab === 'monitor'"
           :piles="piles"
+          :affectedOrderIds="affectedOrderIds"
+          :faultedPileId="faultedPileId"
           @toggle-power="handleTogglePower"
           @report-fault="handleReportFault"
           @recover-pile="handleRecoverPile"
           @trigger-reschedule="handleTriggerReschedule"
+          @single-optimization="handleSingleOptimization"
+          @batch-optimization="handleBatchOptimization"
         />
         <ReportView
           v-else-if="currentTab === 'reports'"

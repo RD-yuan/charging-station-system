@@ -80,7 +80,7 @@ model ChargingOrder {
   userId          String
   chargeMode      ChargeMode
   requestedAmount Float
-  queueNo         String
+  queueNo         String             @unique
   status          OrderStatus        @default(WAITING)
   assignedPileId       String?
   pileQueueEnteredAt   DateTime?

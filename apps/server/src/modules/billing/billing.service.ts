@@ -1,5 +1,6 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common'
 import { BillingPeriod, ChargingSession, OrderStatus, WorkingState } from '@prisma/client'
+import { virtualNowMs } from '../../common/clock'
 import { PrismaService } from '../../prisma/prisma.service'
 import { QueueCacheService } from '../queue/queue-cache.service'
 
@@ -43,7 +44,7 @@ export class BillingService {
     const session = order.sessions.find((item) => item.sessionStatus === 'ACTIVE')
     if (!session) throw new BadRequestException(`Order ${orderId} has no active charging session.`)
 
-    const stopTime = new Date()
+    const stopTime = new Date(virtualNowMs())
     const rules = await this.activeRules()
     const activeActualAmount = this.actualAmount(order.requestedAmount, session, stopTime)
     const activeDuration = this.sessionDuration(session.startTime, stopTime)

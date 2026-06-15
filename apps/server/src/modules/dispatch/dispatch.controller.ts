@@ -1,11 +1,13 @@
-import { Body, Controller, Inject, Param, Post } from '@nestjs/common'
+import { Body, Controller, Inject, Param, Post, UseGuards } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
 import { ChargeMode } from '@prisma/client'
 import { Roles } from '../../common/decorators/roles.decorator'
+import { RolesGuard } from '../auth/guards/roles.guard'
 import { DispatchStrategyType } from '../../common/enums'
 import { DispatchService } from './dispatch.service'
 
 @ApiTags('dispatch')
+@UseGuards(RolesGuard)
 @Roles('ADMIN')
 @Controller('dispatch')
 export class DispatchController {
@@ -33,6 +35,7 @@ export class DispatchController {
 }
 
 @ApiTags('admin optimization')
+@UseGuards(RolesGuard)
 @Roles('ADMIN')
 @Controller('admin/optimization')
 export class AdminOptimizationController {
