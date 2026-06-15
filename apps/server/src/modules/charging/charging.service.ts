@@ -22,14 +22,16 @@ export class ChargingService {
     @Inject(ConfigService) private readonly config: ConfigService
   ) {}
 
-  async submitRequest(dto: SubmitChargingRequestDto) {
-    await this.ensureUserCanSubmit(dto.userId)
+  async submitRequest(dto: SubmitChargingRequestDto, userId?: string) {
+    const uid = userId ?? dto.userId
+    if (!uid) throw new BadRequestException('userId is required.')
+    await this.ensureUserCanSubmit(uid)
     await this.ensureWaitingCapacity(dto.chargeMode)
 
     const queueNo = await this.nextQueueNo(dto.chargeMode)
     const order = await this.prisma.chargingOrder.create({
       data: {
-        userId: dto.userId,
+        userId: uid,
         chargeMode: dto.chargeMode,
         requestedAmount: dto.requestedAmount,
         queueNo,

@@ -1,5 +1,6 @@
 import { Body, Controller, Inject, Post } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
+import { Public } from '../../common/decorators/public.decorator'
 import { AuthService } from './auth.service'
 import { LoginDto, RegisterDto } from './auth.dto'
 
@@ -8,11 +9,13 @@ import { LoginDto, RegisterDto } from './auth.dto'
 export class AuthController {
   constructor(@Inject(AuthService) private readonly authService: AuthService) {}
 
+  @Public()
   @Post('register')
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto)
   }
 
+  @Public()
   @Post('login')
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto)

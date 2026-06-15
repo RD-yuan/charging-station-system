@@ -3,7 +3,8 @@ import { ChargeMode } from '@prisma/client'
 
 export class SubmitChargingRequestDto {
   @IsString()
-  userId!: string
+  @IsOptional()
+  userId?: string
 
   @IsEnum(ChargeMode)
   chargeMode!: ChargeMode

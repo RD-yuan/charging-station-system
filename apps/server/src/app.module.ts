@@ -7,9 +7,9 @@ import { ChargingModule } from './modules/charging/charging.module'
 import { DispatchModule } from './modules/dispatch/dispatch.module'
 import { PileModule } from './modules/pile/pile.module'
 import { QueueModule } from './modules/queue/queue.module'
+import { RealtimeModule } from './realtime/realtime.module'
 import { ReportModule } from './modules/report/report.module'
 import { PrismaModule } from './prisma/prisma.module'
-import { RealtimeModule } from './realtime/realtime.module'
 import { RedisModule } from './redis/redis.module'
 
 @Module({

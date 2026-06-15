@@ -1,4 +1,4 @@
-import { IsNumber, IsOptional, IsString, Min } from 'class-validator'
+import { IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator'
 
 export class RegisterDto {
   @IsString()
@@ -6,6 +6,10 @@ export class RegisterDto {
 
   @IsString()
   password!: string
+
+  @IsOptional()
+  @IsIn(['USER', 'ADMIN'])
+  role?: string
 
   @IsOptional()
   @IsNumber()

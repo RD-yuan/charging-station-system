@@ -1,60 +1,62 @@
-import { BadRequestException, Inject, Injectable, UnauthorizedException } from '@nestjs/common'
-import { ConfigService } from '@nestjs/config'
-import { hashPassword, signToken, verifyPassword } from '../../common/security'
+import { Injectable, UnauthorizedException } from '@nestjs/common'
+import { JwtService } from '@nestjs/jwt'
+import * as bcrypt from 'bcryptjs'
 import { PrismaService } from '../../prisma/prisma.service'
 import { LoginDto, RegisterDto } from './auth.dto'
 
 @Injectable()
 export class AuthService {
   constructor(
-    @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(ConfigService) private readonly config: ConfigService
+    private readonly prisma: PrismaService,
+    private readonly jwtService: JwtService
   ) {}
 
   async register(dto: RegisterDto) {
-    const existing = await this.prisma.user.findUnique({ where: { username: dto.username } })
-    if (existing) throw new BadRequestException('Username already exists.')
-
+    const passwordHash = await bcrypt.hash(dto.password, 10)
     const user = await this.prisma.user.create({
       data: {
         username: dto.username,
-        passwordHash: hashPassword(dto.password),
+        passwordHash,
+        role: (dto.role as 'USER' | 'ADMIN') ?? 'USER',
         batteryCapacity: dto.batteryCapacity ?? 60
       }
     })
-    return {
-      userId: user.id,
-      username: user.username,
-      accessToken: this.issueToken(user.id, user.username, 'USER')
-    }
+    return { userId: user.id, username: user.username, role: user.role }
   }
 
   async login(dto: LoginDto) {
     const user = await this.prisma.user.findUnique({ where: { username: dto.username } })
-    if (!user || !verifyPassword(dto.password, user.passwordHash)) {
+    if (!user) {
       throw new UnauthorizedException('Invalid username or password.')
     }
+    const valid = await bcrypt.compare(dto.password, user.passwordHash)
+    if (!valid) {
+      throw new UnauthorizedException('Invalid username or password.')
+    }
+    const payload = { userId: user.id, username: user.username, role: user.role }
     return {
-      accessToken: this.issueToken(user.id, user.username, 'USER'),
+      accessToken: this.jwtService.sign(payload),
       userId: user.id,
-      username: user.username
+      username: user.username,
+      role: user.role
     }
   }
 
   async adminLogin(dto: LoginDto) {
-    const admin = await this.prisma.administrator.findUnique({ where: { username: dto.username } })
-    if (!admin || !verifyPassword(dto.password, admin.passwordHash)) {
-      throw new UnauthorizedException('Invalid administrator credentials.')
+    const user = await this.prisma.user.findUnique({ where: { username: dto.username } })
+    if (!user || user.role !== 'ADMIN') {
+      throw new UnauthorizedException('Invalid admin credentials.')
     }
+    const valid = await bcrypt.compare(dto.password, user.passwordHash)
+    if (!valid) {
+      throw new UnauthorizedException('Invalid admin credentials.')
+    }
+    const payload = { userId: user.id, username: user.username, role: user.role }
     return {
-      accessToken: this.issueToken(admin.id, admin.username, 'ADMIN'),
-      adminId: admin.id,
-      adminName: admin.adminName,
-      username: admin.username
+      accessToken: this.jwtService.sign(payload),
+      userId: user.id,
+      username: user.username,
+      role: user.role
     }
-  }
-
-  private issueToken(sub: string, username: string, role: 'USER' | 'ADMIN') {
-    return signToken({ sub, username, role }, this.config.get<string>('JWT_SECRET') ?? 'change-me-in-development')
   }
 }
