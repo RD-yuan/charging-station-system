@@ -1,5 +1,6 @@
 import { createApp } from 'vue'
 import App from './App.vue'
-import './style.css' // 引入全局样式文件
+import { router } from './router'
+import './style.css'
 
-createApp(App).mount('#app')
+createApp(App).use(router).mount('#app')

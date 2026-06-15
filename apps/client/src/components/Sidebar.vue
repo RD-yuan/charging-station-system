@@ -12,7 +12,6 @@ const menuItems = [
   { id: 'monitor', label: '电桩状态监控', icon: 'Zap' },
   { id: 'reports', label: '运营统计报表', icon: 'BarChart3' },
   { id: 'websocket', label: 'WebSocket 协同', icon: 'Terminal' },
-  { id: 'electron', label: 'Electron 配置', icon: 'Cpu' },
 ]
 
 const selectTab = (id: string) => {
@@ -73,7 +72,6 @@ const selectTab = (id: string) => {
           <svg v-else-if="item.id === 'monitor'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
           <svg v-else-if="item.id === 'reports'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>
           <svg v-else-if="item.id === 'websocket'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>
-          <svg v-else-if="item.id === 'electron'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M9 1v3"/><path d="M15 1v3"/><path d="M9 20v3"/><path d="M15 20v3"/><path d="M20 9h3"/><path d="M20 15h3"/><path d="M1 9h3"/><path d="M1 15h3"/></svg>
         </span>
         <span>{{ item.label }}</span>
 
@@ -85,8 +83,8 @@ const selectTab = (id: string) => {
 
     <!-- Footer Branding -->
     <div class="p-4 border-t border-slate-800 text-center text-[10px] text-slate-500 font-mono">
-      <p>© 2026 统一设计标准</p>
-      <p class="text-[9px] mt-0.5 text-slate-600">Electron Bundle Spec</p>
+      <p>© 2026 统一客户端</p>
+      <p class="text-[9px] mt-0.5 text-slate-600">用户端 / 管理端</p>
     </div>
   </aside>
 </template>
