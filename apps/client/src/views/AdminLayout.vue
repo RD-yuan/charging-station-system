@@ -186,8 +186,13 @@ async function handleTogglePower(pileId: string) {
 }
 
 async function handleReportFault(pileId: string) {
-  await apiRequest(`/admin/piles/${pileId}/fault`, { method: 'POST', body: '{}' })
+  const data = await apiRequest<any>(`/admin/piles/${pileId}/fault`, { method: 'POST', body: '{}' })
   addSocketLog('OUTGOING', `管理员上报硬件故障：${pileId}`)
+  // 直接从 API 响应设置受影响订单，不依赖 WebSocket
+  if (data?.affectedOrders?.length > 0) {
+    faultedPileId.value = pileId
+    affectedOrderIds.value = new Set(data.affectedOrders.map((o: any) => o.orderId))
+  }
   await loadPiles()
 }
 

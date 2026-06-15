@@ -174,38 +174,56 @@ export class PileService {
       data: { workingState: WorkingState.FAULT }
     })
 
-    // 3. 受影响的桩队列订单（含明细）
-    const affectedOrders = await this.prisma.chargingOrder.findMany({
+    // 3. 受影响的订单 = 被中止的充电订单 + 桩队列中的 IN_PILE_QUEUE 订单
+    const queueAffected = await this.prisma.chargingOrder.findMany({
       where: { assignedPileId: pileId, status: OrderStatus.IN_PILE_QUEUE },
       include: { user: true },
       orderBy: [{ pileQueueEnteredAt: 'asc' }, { submitTime: 'asc' }]
     })
+
+    const allAffected = queueAffected.map((o) => ({
+      orderId: o.id,
+      queueNo: o.queueNo,
+      userId: o.userId,
+      username: o.user.username,
+      requestedAmount: o.requestedAmount,
+      status: o.status
+    }))
+
+    // 被中止的充电订单也列入受影响列表
+    if (active) {
+      const activeUser = await this.prisma.user.findUnique({ where: { id: active.userId }, select: { username: true } })
+      allAffected.unshift({
+        orderId: active.id,
+        queueNo: `${active.queueNo}-A`,
+        userId: active.userId,
+        username: activeUser?.username ?? 'unknown',
+        requestedAmount: active.requestedAmount,
+        status: 'ABORTED' as const
+      })
+    }
 
     // 4. 刷新缓存并广播
     await this.queueCache.refreshPile(pileId)
     this.realtime.broadcast('fault_event', {
       pileId,
       mode: pile.pileType,
-      affectedCount: affectedOrders.length,
+      affectedCount: allAffected.length,
       abortedOrderId: active?.id ?? null,
       continuationOrderId,
-      affectedOrders: affectedOrders.map((o) => ({
-        orderId: o.id,
-        queueNo: o.queueNo,
-        userId: o.userId,
-        username: o.user.username,
-        requestedAmount: o.requestedAmount,
-        status: o.status
-      }))
+      affectedOrders: allAffected
     })
 
-    // 5. 自动执行故障优先级调度，之后触发基础调度处理等候区订单
-    if (affectedOrders.length > 0 || continuationOrderId) {
+    // 5. 若存在 IN_PILE_QUEUE 订单则触发故障重调度，若有续充订单也需基础调度
+    const hasQueueAffected = queueAffected.length > 0
+    if (hasQueueAffected) {
       await this.dispatchService.triggerFaultReschedule(pileId, DispatchStrategyType.PRIORITY)
+    }
+    if (hasQueueAffected || continuationOrderId) {
       await this.dispatchService.triggerBasic(pile.pileType)
     }
 
-    return { pile: updated, affectedCount: affectedOrders.length, detail, continuationOrderId, affectedOrders }
+    return { pile: updated, affectedCount: allAffected.length, detail, continuationOrderId, affectedOrders: allAffected }
   }
 
   reschedule(pileId: string, strategyType: DispatchStrategyType) {

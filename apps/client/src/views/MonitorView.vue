@@ -199,7 +199,7 @@ const progressWidth = (progress: number) => `${Math.min(100, Math.max(0, progres
             
             <div v-if="pile.workingState === 'FAULT'" class="bg-rose-50/50 text-rose-600 text-center py-5 rounded-lg border border-rose-100 text-xs leading-relaxed font-sans px-4">
               <p class="font-bold">该桩检测到硬件故障</p>
-              <p class="text-[10px] text-rose-500 mt-1">当前电源状态：{{ pile.physicalState }}，受影响车辆 {{ pile.queue.length }} 辆。</p>
+              <p class="text-[10px] text-rose-500 mt-1">当前电源状态：{{ pile.physicalState }}，受影响车辆 {{ pile.id === props.faultedPileId ? (props.affectedOrderIds?.size ?? pile.queue.length) : pile.queue.length }} 辆。</p>
             </div>
             <div v-else-if="pile.physicalState === 'OFF'" class="bg-slate-50 text-slate-400 text-center py-5 rounded-lg border border-slate-100 text-xs font-mono">
               充电桩已关闭物理电源，不接受队列车辆。
