@@ -1,47 +1,51 @@
-import { Body, Controller, Inject, Param, Post } from '@nestjs/common'
+import { Body, Controller, Inject, Param, ParseEnumPipe, Post } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
 import { ChargeMode } from '@prisma/client'
 import { DispatchStrategyType } from '../../common/enums'
+import { Roles } from '../../common/decorators/roles.decorator'
 import { DispatchService } from './dispatch.service'
+import { BatchOptimizationDto, FaultDispatchDto, SingleOptimizationDto } from './dto/dispatch.dto'
 
 @ApiTags('dispatch')
+@Roles('ADMIN')
 @Controller('dispatch')
 export class DispatchController {
   constructor(@Inject(DispatchService) private readonly dispatchService: DispatchService) {}
 
   @Post('basic/:mode')
-  basic(@Param('mode') mode: ChargeMode) {
-    return this.dispatchService.triggerBasic(mode)
+  basic(@Param('mode', new ParseEnumPipe(ChargeMode)) mode: ChargeMode) {
+    return this.dispatchService.triggerBasic(mode, true)
   }
 
   @Post('fault/:pileId')
-  fault(@Param('pileId') pileId: string, @Body('strategyType') strategyType: DispatchStrategyType) {
-    return this.dispatchService.triggerFaultReschedule(pileId, strategyType)
+  fault(@Param('pileId') pileId: string, @Body() dto: FaultDispatchDto) {
+    return this.dispatchService.triggerFaultReschedule(pileId, dto.strategyType)
   }
 
   @Post('single-optimization')
-  single(@Body() body: { spotsCount: number; mode: ChargeMode }) {
-    return this.dispatchService.triggerSingleOptimization(body)
+  single(@Body() dto: SingleOptimizationDto) {
+    return this.dispatchService.triggerSingleOptimization(dto)
   }
 
   @Post('batch-optimization')
-  batch(@Body() body: { spotsCount: number }) {
-    return this.dispatchService.triggerBatchOptimization(body)
+  batch(@Body() dto: BatchOptimizationDto) {
+    return this.dispatchService.triggerBatchOptimization(dto)
   }
 }
 
 @ApiTags('admin optimization')
+@Roles('ADMIN')
 @Controller('admin/optimization')
 export class AdminOptimizationController {
   constructor(@Inject(DispatchService) private readonly dispatchService: DispatchService) {}
 
   @Post('single')
-  single(@Body() body: { spotsCount: number; mode: ChargeMode }) {
-    return this.dispatchService.triggerSingleOptimization(body)
+  single(@Body() dto: SingleOptimizationDto) {
+    return this.dispatchService.triggerSingleOptimization(dto)
   }
 
   @Post('batch')
-  batch(@Body() body: { spotsCount: number }) {
-    return this.dispatchService.triggerBatchOptimization(body)
+  batch(@Body() dto: BatchOptimizationDto) {
+    return this.dispatchService.triggerBatchOptimization(dto)
   }
 }

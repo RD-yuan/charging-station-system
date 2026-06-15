@@ -141,9 +141,29 @@ workingState: IDLE / CHARGING / FAULT
 当前版本已包含：
 
 - 统一 Vue3 Web 前端（用户端 + 管理端，`apps/client`）
-- NestJS 模块结构 + JWT 鉴权
+- NestJS 模块结构 + JWT / 角色 / 订单归属鉴权
 - Prisma 数据库 schema
-- Python FastAPI 调度服务
-- Redis 队列缓存基础
+- Python FastAPI 调度服务与 Node 本地降级策略
+- Redis 队列缓存（Redis 不可用时业务自动降级）
+- 标准 WebSocket 实时推送、用户订单恢复和日/周/月报表
+- 演示用户、5 个充电桩和峰平谷计费规则 seed
 
-下一步应优先完成充电桩 seed 数据、WebSocket 推送联调和报表接口完善。
+## 队友连接主机数据库
+
+主机已完成数据库初始化时，队友只需把根目录 `.env.example` 复制为 `apps/server/.env`，并将以下三项主机地址改为实际 IP：
+
+```ini
+DATABASE_URL=mysql://charging_app:charging_pass@10.29.52.22:3306/charging_station
+REDIS_URL=redis://:redis_charging_2026@10.29.52.22:6379
+SCHEDULER_SERVICE_URL=http://10.29.52.22:8100
+```
+
+然后执行：
+
+```bash
+npm install
+npm --workspace apps/server run prisma:generate
+npm run dev
+```
+
+队友模式不要执行 `prisma:migrate` 或 `prisma:seed`。如果 API 或 WebSocket 不在浏览器本机，可复制 `apps/client/.env.example` 为 `apps/client/.env` 并修改对应地址。

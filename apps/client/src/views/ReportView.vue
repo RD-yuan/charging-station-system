@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 
 interface BillingDetail {
   id: string
   pileId: string
   userId: string
+  count: number
   energy: number
   duration: number // minutes
   feeCharge: number
@@ -15,19 +16,23 @@ interface BillingDetail {
 
 const props = defineProps<{
   billingHistory: Array<BillingDetail>
+  timeType: 'DAY' | 'WEEK' | 'MONTH'
 }>()
 
-const timeRange = ref<'DAILY' | 'WEEKLY' | 'MONTHLY'>('DAILY')
+const emit = defineEmits<{
+  'change-time-type': [timeType: 'DAY' | 'WEEK' | 'MONTH']
+}>()
 
 // Aggregated values
 const aggregatedStats = computed(() => {
-  const count = props.billingHistory.length
+  let count = 0
   let totalEnergy = 0
   let totalCharge = 0
   let totalService = 0
   let totalDuration = 0
 
   props.billingHistory.forEach(item => {
+    count += item.count
     totalEnergy += item.energy
     totalCharge += item.feeCharge
     totalService += item.feeService
@@ -52,7 +57,7 @@ const pileStats = computed(() => {
     if (!stats[item.pileId]) {
       stats[item.pileId] = { count: 0, energy: 0, total: 0 }
     }
-    stats[item.pileId].count++
+    stats[item.pileId].count += item.count
     stats[item.pileId].energy += item.energy
     stats[item.pileId].total += item.feeTotal
   })
@@ -76,20 +81,20 @@ const pileStats = computed(() => {
       </div>
       <div class="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
         <button 
-          @click="timeRange = 'DAILY'"
-          :class="`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${timeRange === 'DAILY' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
+          @click="emit('change-time-type', 'DAY')"
+          :class="`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${timeType === 'DAY' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
         >
           日报表 (Daily)
         </button>
         <button 
-          @click="timeRange = 'WEEKLY'"
-          :class="`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${timeRange === 'WEEKLY' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
+          @click="emit('change-time-type', 'WEEK')"
+          :class="`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${timeType === 'WEEK' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
         >
           周报表 (Weekly)
         </button>
         <button 
-          @click="timeRange = 'MONTHLY'"
-          :class="`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${timeRange === 'MONTHLY' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
+          @click="emit('change-time-type', 'MONTH')"
+          :class="`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${timeType === 'MONTH' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
         >
           月报表 (Monthly)
         </button>

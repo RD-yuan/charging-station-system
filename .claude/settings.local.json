@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(PYTHONIOENCODING=utf-8 python)",
+      "Bash(ls acceptance_smoke.xlsx)",
+      "Bash(rm acceptance_smoke.xlsx)",
+      "Bash(ls *.xlsx)",
+      "Bash(npm --workspace apps/server run lint)",
+      "Bash(npm --workspace apps/server run test)",
+      "Bash(xargs grep -l \"JwtModule\")"
+    ]
+  }
+}

@@ -6,6 +6,7 @@ import Redis from 'ioredis'
 export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name)
   private client: Redis
+  private available = false
 
   constructor(@Inject(ConfigService) private readonly config: ConfigService) {
     const url = config.get<string>('REDIS_URL') ?? 'redis://localhost:6379'
@@ -17,29 +18,39 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       },
       lazyConnect: true
     })
+    this.client.on('ready', () => {
+      this.available = true
+    })
+    this.client.on('close', () => {
+      this.available = false
+    })
   }
 
   async onModuleInit() {
     try {
       await this.client.connect()
       await this.client.ping()
+      this.available = true
       this.logger.log('Redis connected')
     } catch (err) {
+      this.available = false
       this.logger.warn('Redis unavailable — caching and locks disabled. ' + String(err))
     }
   }
 
   async onModuleDestroy() {
-    await this.client.quit()
+    this.client.disconnect()
   }
 
   // ── 基础缓存 ──────────────────────────────────────
 
   async get(key: string): Promise<string | null> {
+    if (!this.canUse()) return null
     return this.client.get(key)
   }
 
   async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
+    if (!this.canUse()) return
     if (ttlSeconds) {
       await this.client.set(key, value, 'EX', ttlSeconds)
     } else {
@@ -57,10 +68,12 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async del(key: string): Promise<void> {
+    if (!this.canUse()) return
     await this.client.del(key)
   }
 
   async exists(key: string): Promise<boolean> {
+    if (!this.canUse()) return false
     return (await this.client.exists(key)) === 1
   }
 
@@ -68,26 +81,31 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   /** 从右边入队（队尾添加） */
   async queuePush(key: string, ...values: string[]): Promise<void> {
+    if (!this.canUse()) return
     await this.client.rpush(key, ...values)
   }
 
   /** 从左边出队（队首取出） */
   async queuePop(key: string): Promise<string | null> {
+    if (!this.canUse()) return null
     return this.client.lpop(key)
   }
 
   /** 从队列中移除指定值 */
   async queueRemove(key: string, value: string): Promise<void> {
+    if (!this.canUse()) return
     await this.client.lrem(key, 0, value)
   }
 
   /** 获取队列全部元素 */
   async queueRange(key: string, start = 0, stop = -1): Promise<string[]> {
+    if (!this.canUse()) return []
     return this.client.lrange(key, start, stop)
   }
 
   /** 队列长度 */
   async queueLength(key: string): Promise<number> {
+    if (!this.canUse()) return 0
     return this.client.llen(key)
   }
 
@@ -99,18 +117,21 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
    * @param ttlMs  锁自动过期时间（毫秒）
    */
   async lock(key: string, ttlMs = 5000): Promise<boolean> {
+    if (!this.canUse()) return false
     const result = await this.client.set(key, '1', 'PX', ttlMs, 'NX')
     return result === 'OK'
   }
 
   /** 释放锁 */
   async unlock(key: string): Promise<void> {
+    if (!this.canUse()) return
     await this.client.del(key)
   }
 
   // ── 健康检查 ──────────────────────────────────────
 
   async ping(): Promise<boolean> {
+    if (!this.canUse()) return false
     try {
       return (await this.client.ping()) === 'PONG'
     } catch {
@@ -121,5 +142,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   /** 暴露底层客户端供特殊场景使用 */
   get raw(): Redis {
     return this.client
+  }
+
+  private canUse() {
+    return this.available && this.client.status === 'ready'
   }
 }

@@ -6,6 +6,8 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 import { AppModule } from './app.module'
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter'
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard'
+import { RolesGuard } from './modules/auth/guards/roles.guard'
+import { RealtimeService } from './realtime/realtime.service'
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule)
@@ -20,7 +22,7 @@ async function bootstrap() {
     })
   )
   app.useGlobalFilters(new AllExceptionsFilter())
-  app.useGlobalGuards(app.get(JwtAuthGuard))
+  app.useGlobalGuards(app.get(JwtAuthGuard), app.get(RolesGuard))
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('智能充电桩调度计费系统 API')
@@ -31,6 +33,7 @@ async function bootstrap() {
   SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swaggerConfig))
 
   const port = config.get<number>('PORT') ?? 3000
+  app.get(RealtimeService).attach(app.getHttpServer())
   await app.listen(port)
 }
 

@@ -4,7 +4,10 @@ import { ref } from 'vue'
 interface QueueCar {
   id: string
   queueNo: string
+  status: 'IN_PILE_QUEUE' | 'CHARGING' | 'ABORTED'
   progress: number
+  deliveredEnergy: number
+  interrupted: boolean
   userId: string
   amount: number
 }
@@ -12,11 +15,13 @@ interface QueueCar {
 interface Pile {
   id: string
   type: 'FAST' | 'SLOW'
+  power: number
   physicalState: 'ON' | 'OFF'
   workingState: 'IDLE' | 'CHARGING' | 'FAULT'
   lastActive: string
   totalEnergy: number
   queue: Array<QueueCar>
+  interruptedOrder: QueueCar | null
 }
 
 defineProps<{
@@ -112,7 +117,7 @@ const handleReschedule = (pileId: string) => {
             <div>
               <p class="text-[10px] text-slate-400 font-sans font-medium uppercase">物理功率级别</p>
               <p class="text-slate-900 font-bold mt-1 text-sm">
-                {{ pile.type === 'FAST' ? '30 kW' : '7 kW' }}
+                {{ pile.power }} kW
               </p>
             </div>
             <div>
@@ -130,19 +135,44 @@ const handleReschedule = (pileId: string) => {
             <div v-if="pile.physicalState === 'OFF'" class="bg-slate-50 text-slate-400 text-center py-5 rounded-lg border border-slate-100 text-xs font-mono">
               充电桩已关闭物理电源，不接受队列车辆。
             </div>
-            <div v-else-if="pile.workingState === 'FAULT'" class="bg-rose-50/50 text-rose-600 text-center py-5 rounded-lg border border-rose-100 text-xs leading-relaxed font-sans px-4">
-              <p class="font-bold">⚠️ 该桩检测到紧急电器故障</p>
-              <p class="text-[10px] text-rose-500 mt-1">当前队列中 {{ pile.queue.length }} 辆车受到影响，请立即重调度派车！</p>
-            </div>
-            <div v-else-if="pile.queue.length === 0" class="bg-slate-50 text-slate-400 text-center py-5 rounded-lg border border-slate-100 text-xs font-mono">
-              当前车位空闲，无车辆入队列中。
-            </div>
-            <div v-else class="space-y-2">
+            <template v-else>
+              <div v-if="pile.workingState === 'FAULT'" class="bg-rose-50/50 text-rose-600 text-center py-4 rounded-lg border border-rose-100 text-xs leading-relaxed font-sans px-4 mb-2">
+                <p class="font-bold">该桩检测到硬件故障</p>
+                <p class="text-[10px] text-rose-500 mt-1">正在充电的订单已按故障中断并生成详单；未开始车辆可执行重调度。</p>
+              </div>
+              <div
+                v-if="pile.interruptedOrder"
+                class="p-3 mb-2 rounded-lg border border-rose-200 bg-rose-50/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-mono"
+              >
+                <div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-600 text-white">最近故障中断</span>
+                    <span class="font-bold text-slate-900">{{ pile.interruptedOrder.queueNo }}</span>
+                    <span class="text-slate-400 font-sans">({{ pile.interruptedOrder.userId }})</span>
+                  </div>
+                  <div class="mt-1 text-[10px] text-slate-500 font-sans">
+                    请求电量: {{ pile.interruptedOrder.amount }} kWh · 故障前已充 {{ pile.interruptedOrder.deliveredEnergy.toFixed(2) }} kWh
+                  </div>
+                </div>
+                <div class="w-full sm:w-40">
+                  <div class="flex justify-between text-[9px] text-slate-500 mb-0.5">
+                    <span>故障前充能进度</span>
+                    <span class="text-rose-600 font-bold">{{ pile.interruptedOrder.progress.toFixed(1) }}%</span>
+                  </div>
+                  <div class="w-full bg-slate-200/80 rounded-full h-1.5 overflow-hidden">
+                    <div class="bg-rose-500 h-1.5 rounded-full" :style="`width: ${pile.interruptedOrder.progress}%`"></div>
+                  </div>
+                </div>
+              </div>
+              <div v-if="pile.queue.length === 0" class="bg-slate-50 text-slate-400 text-center py-5 rounded-lg border border-slate-100 text-xs font-mono">
+                {{ pile.workingState === 'FAULT' ? '该故障桩当前没有待重调度订单。' : '当前没有活动排队订单。' }}
+              </div>
+              <div v-else class="space-y-2">
               <div 
                 v-for="(car, idx) in pile.queue" 
                 :key="car.id"
                 :class="`p-3 rounded-lg border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-mono ${
-                  idx === 0 
+                  idx === 0
                     ? 'bg-emerald-50/40 border-emerald-100/80 shadow-xs' 
                     : 'bg-slate-50/50 border-slate-150'
                 }`"
@@ -150,21 +180,22 @@ const handleReschedule = (pileId: string) => {
                 <div>
                   <div class="flex items-center gap-1.5">
                     <span :class="`px-1.5 py-0.2 rounded text-[10px] font-bold ${idx === 0 ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`">
-                      {{ idx === 0 ? '首车' : `等候` }}
+                      {{ idx === 0 ? '首车' : '等候' }}
                     </span>
                     <span class="font-bold text-slate-900">{{ car.queueNo }}</span>
                     <span class="text-slate-400 font-sans">({{ car.userId }})</span>
                   </div>
                   <div class="mt-1 text-[10px] text-slate-500 font-sans">
-                     请求电量及车辆总空间: {{ car.amount }} kWh
+                     请求电量: {{ car.amount }} kWh
+                     <span v-if="car.status !== 'IN_PILE_QUEUE'"> · 已充 {{ car.deliveredEnergy.toFixed(2) }} kWh</span>
                   </div>
                 </div>
 
                 <!-- Live progress meter for first car -->
-                <div v-if="idx === 0 && pile.workingState === 'CHARGING'" class="w-full sm:w-32">
+                <div v-if="car.status === 'CHARGING'" class="w-full sm:w-40">
                   <div class="flex justify-between text-[9px] text-slate-500 mb-0.5">
-                    <span>充能百分比</span>
-                    <span class="text-emerald-600 font-bold">{{ Math.round(car.progress) }}%</span>
+                    <span>实时充能百分比</span>
+                    <span class="text-emerald-600 font-bold">{{ car.progress.toFixed(1) }}%</span>
                   </div>
                   <div class="w-full bg-slate-200/80 rounded-full h-1.5 overflow-hidden">
                     <div class="bg-emerald-500 h-1.5 rounded-full transition-all duration-300" :style="`width: ${car.progress}%`"></div>
@@ -175,6 +206,7 @@ const handleReschedule = (pileId: string) => {
                 </div>
               </div>
             </div>
+            </template>
           </div>
 
           <!-- Admin Control Button Action Bar -->
@@ -211,7 +243,7 @@ const handleReschedule = (pileId: string) => {
 
             <!-- Manual Reschedule (Only shown during fault state and are items wait in queue) -->
             <button
-              v-if="pile.workingState === 'FAULT' && pile.queue.length > 0"
+              v-if="pile.workingState === 'FAULT' && pile.queue.some((car) => car.status === 'IN_PILE_QUEUE')"
               @click="handleReschedule(pile.id)"
               class="ml-auto px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wide bg-amber-500 text-slate-950 hover:bg-amber-400 outline-none border border-amber-600 cursor-pointer animate-bounce"
             >

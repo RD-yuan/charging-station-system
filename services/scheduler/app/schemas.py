@@ -35,6 +35,7 @@ class PileQueueState(BaseModel):
     pile_type: ChargeMode
     power: float = Field(gt=0)
     working_state: WorkingState = WorkingState.IDLE
+    queue_capacity: int = Field(default=2, gt=0)
     queued_orders: list[CarOrder] = Field(default_factory=list)
 
 

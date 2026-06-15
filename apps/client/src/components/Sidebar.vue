@@ -12,6 +12,7 @@ const menuItems = [
   { id: 'monitor', label: '电桩状态监控', icon: 'Zap' },
   { id: 'reports', label: '运营统计报表', icon: 'BarChart3' },
   { id: 'websocket', label: 'WebSocket 协同', icon: 'Terminal' },
+  { id: 'acceptance', label: '作业验收测试', icon: 'ClipboardCheck' },
 ]
 
 const selectTab = (id: string) => {
@@ -72,6 +73,7 @@ const selectTab = (id: string) => {
           <svg v-else-if="item.id === 'monitor'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
           <svg v-else-if="item.id === 'reports'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>
           <svg v-else-if="item.id === 'websocket'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>
+          <svg v-else-if="item.id === 'acceptance'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
         </span>
         <span>{{ item.label }}</span>
 

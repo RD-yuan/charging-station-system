@@ -1,13 +1,15 @@
 import { Inject, Injectable } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { ChargeMode, OrderStatus, PhysicalState, WorkingState } from '@prisma/client'
+import { ClockService } from '../../common/clock.service'
 import { DispatchStrategyType } from '../../common/enums'
 import { PrismaService } from '../../prisma/prisma.service'
 import { RealtimeService } from '../../realtime/realtime.service'
 import { QueueCacheService } from '../queue/queue-cache.service'
+import { ChargingStarterService } from '../charging/charging-starter.service'
 import { HttpSchedulerClient } from './http-scheduler.client'
 
-interface SchedulerOrder {
+export interface SchedulerOrder {
   order_id: string
   queue_no: string
   charge_mode?: ChargeMode | null
@@ -15,15 +17,16 @@ interface SchedulerOrder {
   status: OrderStatus
 }
 
-interface SchedulerPile {
+export interface SchedulerPile {
   pile_id: string
   pile_type: ChargeMode
   power: number
   working_state: WorkingState
+  queue_capacity: number
   queued_orders: SchedulerOrder[]
 }
 
-interface SchedulerAssignment {
+export interface SchedulerAssignment {
   order_id?: string
   orderId?: string
   queue_no?: string
@@ -47,10 +50,12 @@ export class DispatchService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(QueueCacheService) private readonly queueCache: QueueCacheService,
     @Inject(RealtimeService) private readonly realtime: RealtimeService,
-    @Inject(ConfigService) private readonly config: ConfigService
+    @Inject(ConfigService) private readonly config: ConfigService,
+    @Inject(ChargingStarterService) private readonly chargingStarter: ChargingStarterService,
+    @Inject(ClockService) private readonly clock: ClockService
   ) {}
 
-  async triggerBasic(mode: ChargeMode | string) {
+  async triggerBasic(mode: ChargeMode | string, autoStart = false) {
     const chargeMode = mode as ChargeMode
     const waitingOrders = await this.waitingOrders(chargeMode)
     const pileQueues = await this.pileQueues(chargeMode)
@@ -58,9 +63,12 @@ export class DispatchService {
       localBasicDispatch(waitingOrders, pileQueues)
     )
     const applied = await this.applyAssignments(response.assignments ?? [], chargeMode)
+    const autoStarted = autoStart
+      ? await this.chargingStarter.autoStartPileHeads(pileQueues.map((pile) => pile.pile_id))
+      : []
     await this.queueCache.refreshMode(chargeMode)
-    this.realtime.broadcast('dispatch_result', { strategy: 'BASIC', mode: chargeMode, applied })
-    return { ...response, assignments: applied }
+    this.realtime.broadcast('dispatch_result', { strategy: 'BASIC', mode: chargeMode, applied, autoStarted })
+    return { ...response, assignments: applied, autoStarted }
   }
 
   async triggerFaultReschedule(pileId: string, strategyType: DispatchStrategyType) {
@@ -70,18 +78,38 @@ export class DispatchService {
       : '/dispatch/fault-priority'
     const affectedOrders = await this.assignedOrders(pileId)
     const sameModePileQueues = await this.pileQueues(pile.pileType, pileId)
+    const timeOrderCandidates = [...affectedOrders, ...sameModePileQueues.flatMap((queue) => queue.queued_orders)]
+    const movableOrderIds = strategyType === DispatchStrategyType.TIME_ORDER
+      ? [...affectedOrders, ...sameModePileQueues.flatMap((queue) => queue.queued_orders)].map((order) => order.order_id)
+      : affectedOrders.map((order) => order.order_id)
+    if (movableOrderIds.length > 0) {
+      await this.prisma.chargingOrder.updateMany({
+        where: { id: { in: movableOrderIds }, status: OrderStatus.IN_PILE_QUEUE },
+        data: { status: OrderStatus.WAITING, assignedPileId: null, pileQueueEnteredAt: null }
+      })
+    }
     const response = await this.safeSchedule(
       path,
       { pile_id: pileId, affected_orders: affectedOrders, same_mode_pile_queues: sameModePileQueues },
       () => strategyType === DispatchStrategyType.TIME_ORDER
-        ? localTimeOrderDispatch(affectedOrders, sameModePileQueues)
+        ? localTimeOrderDispatch(
+          timeOrderCandidates,
+          sameModePileQueues.map((queue) => ({ ...queue, queued_orders: [] }))
+        )
         : localBasicDispatch(affectedOrders, sameModePileQueues)
     )
     const applied = await this.applyAssignments(response.assignments ?? [], pile.pileType)
-    await this.queueCache.refreshPile(pileId)
+    const autoStarted = await this.chargingStarter.autoStartPileHeads(
+      sameModePileQueues.map((queue) => queue.pile_id)
+    )
+    await Promise.all([
+      this.queueCache.refreshMode(pile.pileType),
+      this.queueCache.refreshPile(pileId),
+      ...sameModePileQueues.map((queue) => this.queueCache.refreshPile(queue.pile_id))
+    ])
     this.realtime.broadcast('fault_event', { pileId, strategyType, affectedCount: affectedOrders.length, reassignedCount: applied.length })
-    this.realtime.broadcast('dispatch_result', { strategy: strategyType, mode: pile.pileType, applied })
-    return { ...response, assignments: applied }
+    this.realtime.broadcast('dispatch_result', { strategy: strategyType, mode: pile.pileType, applied, autoStarted })
+    return { ...response, assignments: applied, autoStarted }
   }
 
   async triggerSingleOptimization(payload: { spotsCount: number; mode: ChargeMode }) {
@@ -99,9 +127,12 @@ export class DispatchService {
       () => localBasicDispatch(candidateOrders, pileQueues)
     )
     const applied = await this.applyAssignments(response.assignments ?? [], mode)
+    const autoStarted = await this.chargingStarter.autoStartPileHeads(
+      pileQueues.map((pile) => pile.pile_id)
+    )
     await this.queueCache.refreshMode(mode)
-    this.realtime.broadcast('dispatch_result', { strategy: 'SINGLE_OPTIMIZATION', mode, applied })
-    return { ...response, assignments: applied }
+    this.realtime.broadcast('dispatch_result', { strategy: 'SINGLE_OPTIMIZATION', mode, applied, autoStarted })
+    return { ...response, assignments: applied, autoStarted }
   }
 
   async triggerBatchOptimization(payload: { spotsCount: number }) {
@@ -117,23 +148,39 @@ export class DispatchService {
       () => localBatchDispatch(candidateOrders, pileQueues)
     )
     const applied = await this.applyAssignments(response.assignments ?? [])
+    const autoStarted = await this.chargingStarter.autoStartPileHeads(
+      pileQueues.map((pile) => pile.pile_id)
+    )
     await this.queueCache.refreshAll()
-    this.realtime.broadcast('dispatch_result', { strategy: 'BATCH_OPTIMIZATION', applied })
-    return { ...response, assignments: applied }
+    this.realtime.broadcast('dispatch_result', { strategy: 'BATCH_OPTIMIZATION', applied, autoStarted })
+    return { ...response, assignments: applied, autoStarted }
   }
 
   async triggerRecoveryReschedule(pileId: string) {
     const pile = await this.prisma.chargingPile.findUniqueOrThrow({ where: { id: pileId } })
     const sameModePileQueues = await this.pileQueues(pile.pileType)
     const affectedOrders = sameModePileQueues.flatMap((queue) => queue.queued_orders)
+    if (affectedOrders.length > 0) {
+      await this.prisma.chargingOrder.updateMany({
+        where: { id: { in: affectedOrders.map((order) => order.order_id) }, status: OrderStatus.IN_PILE_QUEUE },
+        data: { status: OrderStatus.WAITING, assignedPileId: null, pileQueueEnteredAt: null }
+      })
+    }
     const response = await this.safeSchedule(
       '/dispatch/recovery-time-order',
       { pile_id: pileId, affected_orders: [], same_mode_pile_queues: sameModePileQueues },
       () => localTimeOrderDispatch(affectedOrders, sameModePileQueues.map((queue) => ({ ...queue, queued_orders: [] })))
     )
     const applied = await this.applyAssignments(response.assignments ?? [], pile.pileType)
-    this.realtime.broadcast('dispatch_result', { strategy: 'RECOVERY_TIME_ORDER', mode: pile.pileType, applied })
-    return { ...response, assignments: applied }
+    const autoStarted = await this.chargingStarter.autoStartPileHeads(
+      sameModePileQueues.map((queue) => queue.pile_id)
+    )
+    await Promise.all([
+      this.queueCache.refreshMode(pile.pileType),
+      ...sameModePileQueues.map((queue) => this.queueCache.refreshPile(queue.pile_id))
+    ])
+    this.realtime.broadcast('dispatch_result', { strategy: 'RECOVERY_TIME_ORDER', mode: pile.pileType, applied, autoStarted })
+    return { ...response, assignments: applied, autoStarted }
   }
 
   private async safeSchedule(path: string, payload: unknown, fallback: () => SchedulerAssignment[]): Promise<SchedulerResponse> {
@@ -188,6 +235,7 @@ export class DispatchService {
       pile_type: pile.pileType,
       power: pile.power,
       working_state: pile.workingState,
+      queue_capacity: this.pileQueueCapacity(),
       queued_orders: pile.orders.map(toSchedulerOrder)
     }))
   }
@@ -195,7 +243,7 @@ export class DispatchService {
   private async applyAssignments(assignments: SchedulerAssignment[], mode?: ChargeMode) {
     const applied: Array<{ orderId: string; queueNo: string; pileId: string; projectedFinishTime: number }> = []
     const touchedPiles = new Set<string>()
-    const enteredAt = Date.now()
+    const enteredAt = this.clock.millis()
 
     for (const [index, assignment] of assignments.entries()) {
       const orderId = assignment.order_id ?? assignment.orderId
@@ -254,10 +302,12 @@ function toSchedulerOrder(order: { id: string; queueNo: string; chargeMode: Char
   }
 }
 
-function localBasicDispatch(orders: SchedulerOrder[], piles: SchedulerPile[]): SchedulerAssignment[] {
+export function localBasicDispatch(orders: SchedulerOrder[], piles: SchedulerPile[]): SchedulerAssignment[] {
   const assignments: SchedulerAssignment[] = []
   for (const order of orders) {
-    const candidates = piles.filter((pile) => pile.working_state !== WorkingState.FAULT)
+    const candidates = piles.filter(
+      (pile) => pile.working_state !== WorkingState.FAULT && pile.queued_orders.length < pile.queue_capacity
+    )
     if (candidates.length === 0) continue
     const target = candidates.sort((a, b) => {
       const aFinish = projectedFinish(order, a)
@@ -276,7 +326,7 @@ function localBasicDispatch(orders: SchedulerOrder[], piles: SchedulerPile[]): S
   return assignments
 }
 
-function localTimeOrderDispatch(orders: SchedulerOrder[], piles: SchedulerPile[]) {
+export function localTimeOrderDispatch(orders: SchedulerOrder[], piles: SchedulerPile[]) {
   return localBasicDispatch([...orders].sort((a, b) => queueNumber(a.queue_no) - queueNumber(b.queue_no)), piles)
 }
 

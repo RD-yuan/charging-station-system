@@ -24,11 +24,25 @@ export async function apiRequest<T>(
   })
 
   if (!response.ok) {
+    if (response.status === 401 && token) {
+      const tokenKey = role === 'admin' ? 'admin_access_token' : 'access_token'
+      localStorage.removeItem(tokenKey)
+      window.location.assign(`/auth?mode=${role}`)
+    }
     const message = await parseErrorMessage(response)
     throw new Error(message || `HTTP ${response.status}`)
   }
 
-  return response.json() as Promise<T>
+  if (response.status === 204) return undefined as T
+
+  const text = await response.text()
+  if (!text.trim()) return undefined as T
+
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    throw new Error(`接口返回了无效的 JSON（HTTP ${response.status}）`)
+  }
 }
 
 async function parseErrorMessage(response: Response) {

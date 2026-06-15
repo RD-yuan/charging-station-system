@@ -1,15 +1,13 @@
-import { IsIn, IsNumber, IsOptional, IsString, Min } from 'class-validator'
+import { IsNotEmpty, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator'
 
 export class RegisterDto {
   @IsString()
+  @IsNotEmpty()
   username!: string
 
   @IsString()
+  @MinLength(6)
   password!: string
-
-  @IsOptional()
-  @IsIn(['USER', 'ADMIN'])
-  role?: string
 
   @IsOptional()
   @IsNumber()
@@ -19,8 +17,10 @@ export class RegisterDto {
 
 export class LoginDto {
   @IsString()
+  @IsNotEmpty()
   username!: string
 
   @IsString()
+  @IsNotEmpty()
   password!: string
 }

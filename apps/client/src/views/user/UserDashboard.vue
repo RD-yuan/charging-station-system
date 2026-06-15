@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { apiRequest } from '../../api/http'
 
 const userId = localStorage.getItem('user_id') ?? ''
@@ -18,14 +18,57 @@ const queueStatus = reactive({
   aheadCount: 0,
   estimatedWaitTime: 0,
   chargeMode: 'FAST' as 'FAST' | 'SLOW' | undefined,
-  requestedAmount: 30 as number | undefined
+  requestedAmount: 30 as number | undefined,
+  recoverable: false
 })
 
 const details = ref<Array<Record<string, unknown>>>([])
 const toast = ref<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
+let currentOrderTimer: ReturnType<typeof setInterval> | null = null
+let currentOrderRefreshInFlight = false
 
 const hasValidOrder = computed(() => Boolean(queueStatus.orderId && queueStatus.orderId !== '未生成'))
 const canModify = computed(() => hasValidOrder.value && queueStatus.status === 'WAITING')
+const displayStatus = computed(() => queueStatus.recoverable ? '故障中断，等待自动恢复' : queueStatus.status)
+
+onMounted(() => {
+  void restoreDashboard()
+  currentOrderTimer = setInterval(() => void refreshCurrentOrder(), 2000)
+})
+
+onUnmounted(() => {
+  if (currentOrderTimer) clearInterval(currentOrderTimer)
+})
+
+async function restoreDashboard() {
+  try {
+    const [currentOrder, history] = await Promise.all([
+      apiRequest<Partial<typeof queueStatus> | null>('/user/charging/current', {}, 'user'),
+      apiRequest<Array<Record<string, unknown>>>('/user/details', {}, 'user')
+    ])
+    if (currentOrder) applyQueueData(currentOrder)
+    details.value = history
+  } catch (error) {
+    showError(error, '加载用户数据失败')
+  }
+}
+
+async function refreshCurrentOrder() {
+  if (currentOrderRefreshInFlight) return
+  currentOrderRefreshInFlight = true
+  try {
+    const currentOrder = await apiRequest<Partial<typeof queueStatus> | null>(
+      '/user/charging/current',
+      {},
+      'user'
+    )
+    if (currentOrder) applyQueueData(currentOrder)
+  } catch {
+    // Background refresh stays quiet; explicit actions surface their own errors.
+  } finally {
+    currentOrderRefreshInFlight = false
+  }
+}
 
 function showToast(type: 'success' | 'error' | 'info', text: string) {
   toast.value = { type, text }
@@ -64,7 +107,6 @@ async function submitRequest() {
       {
         method: 'POST',
         body: JSON.stringify({
-          userId,
           ...requestForm
         })
       },
@@ -94,11 +136,8 @@ async function queryQueue() {
 
 async function modifyMode() {
   if (!hasOrder()) return
-  if (!canModify.value) {
-    showToast('error', '仅 WAITING 状态可修改模式，已进入充电桩队列后请取消后重新排队')
-    return
-  }
   try {
+    if (!(await confirmWaitingStatus())) return
     const data = await apiRequest<Partial<typeof queueStatus>>(
       `/user/charging/${queueStatus.orderId}/mode`,
       {
@@ -110,17 +149,15 @@ async function modifyMode() {
     applyQueueData(data)
     showToast('success', '充电模式已修改')
   } catch (error) {
-    showError(error, '修改模式失败')
+    await refreshCurrentOrder()
+    showModifyError(error, '修改模式失败')
   }
 }
 
 async function modifyAmount() {
   if (!hasOrder()) return
-  if (!canModify.value) {
-    showToast('error', '仅 WAITING 状态可修改电量，已进入充电桩队列后请取消后重新排队')
-    return
-  }
   try {
+    if (!(await confirmWaitingStatus())) return
     const data = await apiRequest<Partial<typeof queueStatus>>(
       `/user/charging/${queueStatus.orderId}/amount`,
       {
@@ -132,23 +169,31 @@ async function modifyAmount() {
     applyQueueData(data)
     showToast('success', '请求电量已修改')
   } catch (error) {
-    showError(error, '修改电量失败')
+    await refreshCurrentOrder()
+    showModifyError(error, '修改电量失败')
   }
 }
 
-async function startCharging() {
-  if (!hasOrder()) return
-  try {
-    const data = await apiRequest<{ status: string }>(
-      `/user/charging/${queueStatus.orderId}/start`,
-      { method: 'POST', body: '{}' },
-      'user'
-    )
-    queueStatus.status = data.status
-    showToast('success', '开始充电')
-  } catch (error) {
-    showError(error, '开始充电失败')
+async function confirmWaitingStatus() {
+  const data = await apiRequest<Partial<typeof queueStatus>>(
+    `/user/charging/${queueStatus.orderId}/queue`,
+    {},
+    'user'
+  )
+  applyQueueData(data)
+  if (data.status === 'WAITING') return true
+
+  showToast('error', `订单当前状态为 ${data.status ?? '未知'}，只有 WAITING 状态可以修改`)
+  return false
+}
+
+function showModifyError(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : ''
+  if (message.includes('Only WAITING orders can be modified')) {
+    showToast('error', `订单已更新为 ${queueStatus.status}，只有 WAITING 状态可以修改`)
+    return
   }
+  showError(error, fallback)
 }
 
 async function stopCharging() {
@@ -300,7 +345,7 @@ const statusColor: Record<string, string> = {
           <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
             <p class="text-[10px] text-slate-500 uppercase">状态</p>
             <span class="inline-block mt-1 px-2 py-1 rounded-lg text-[10px] font-bold border" :class="statusColor[queueStatus.status] ?? statusColor.WAITING">
-              {{ queueStatus.status }}
+              {{ displayStatus }}
             </span>
           </div>
           <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
@@ -312,8 +357,10 @@ const statusColor: Record<string, string> = {
             <p class="text-sm font-bold font-mono text-slate-900 mt-1">{{ queueStatus.estimatedWaitTime }} 分钟</p>
           </div>
         </div>
+        <div v-if="queueStatus.recoverable" class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+          该订单因充电桩故障暂停。管理员恢复充电桩后，系统会将订单放回原桩队首并自动继续充电。
+        </div>
         <div class="flex flex-wrap gap-2">
-          <button class="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl" @click="startCharging">开始充电</button>
           <button class="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold rounded-xl" @click="stopCharging">结束充电</button>
           <button class="px-4 py-2.5 bg-rose-500 hover:bg-rose-400 text-white text-xs font-bold rounded-xl" @click="cancelCharging">取消充电</button>
         </div>

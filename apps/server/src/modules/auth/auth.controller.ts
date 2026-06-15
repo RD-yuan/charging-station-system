@@ -36,7 +36,7 @@ export class UserAuthAliasController {
   @Public()
   @Post('login')
   login(@Body() dto: LoginDto) {
-    return this.authService.login(dto)
+    return this.authService.userLogin(dto)
   }
 }
 

@@ -15,7 +15,11 @@ def projected_finish_time(order: CarOrder, pile: PileQueueState) -> float:
 
 
 def choose_shortest_pile(order: CarOrder, piles: list[PileQueueState]) -> PileQueueState | None:
-    available = [pile for pile in piles if pile.working_state != "FAULT"]
+    available = [
+        pile
+        for pile in piles
+        if pile.working_state != "FAULT" and len(pile.queued_orders) < pile.queue_capacity
+    ]
     if not available:
         return None
     return min(

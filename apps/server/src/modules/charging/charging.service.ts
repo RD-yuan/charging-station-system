@@ -1,6 +1,7 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common'
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { ChargeMode, OrderStatus, PhysicalState, WorkingState } from '@prisma/client'
+import { ChargeMode, OrderStatus } from '@prisma/client'
+import { ClockService } from '../../common/clock.service'
 import { PrismaService } from '../../prisma/prisma.service'
 import { BillingService } from '../billing/billing.service'
 import { DispatchService } from '../dispatch/dispatch.service'
@@ -11,6 +12,7 @@ import {
   ModifyModeDto,
   SubmitChargingRequestDto
 } from './charging.dto'
+import { ChargingStarterService } from './charging-starter.service'
 
 @Injectable()
 export class ChargingService {
@@ -19,13 +21,22 @@ export class ChargingService {
     @Inject(DispatchService) private readonly dispatchService: DispatchService,
     @Inject(BillingService) private readonly billingService: BillingService,
     @Inject(QueueCacheService) private readonly queueCache: QueueCacheService,
-    @Inject(ConfigService) private readonly config: ConfigService
+    @Inject(ConfigService) private readonly config: ConfigService,
+    @Inject(ChargingStarterService) private readonly chargingStarter: ChargingStarterService,
+    @Inject(ClockService) private readonly clock: ClockService
   ) {}
+
+  private clockNow(): Date {
+    return this.clock.now()
+  }
 
   async submitRequest(dto: SubmitChargingRequestDto, userId?: string) {
     const uid = userId ?? dto.userId
     if (!uid) throw new BadRequestException('userId is required.')
-    await this.ensureUserCanSubmit(uid)
+    const user = await this.ensureUserCanSubmit(uid)
+    if (dto.requestedAmount > user.batteryCapacity) {
+      throw new BadRequestException('Requested amount exceeds the user battery capacity.')
+    }
     await this.ensureWaitingCapacity(dto.chargeMode)
 
     const queueNo = await this.nextQueueNo(dto.chargeMode)
@@ -35,17 +46,36 @@ export class ChargingService {
         chargeMode: dto.chargeMode,
         requestedAmount: dto.requestedAmount,
         queueNo,
-        status: OrderStatus.WAITING
+        status: OrderStatus.WAITING,
+        submitTime: this.clockNow()
       }
     })
     await this.queueCache.refreshMode(dto.chargeMode)
-    await this.dispatchService.triggerBasic(dto.chargeMode)
-    return this.queueStatus(order.id)
+    await this.dispatchService.triggerBasic(dto.chargeMode, true)
+    return this.queueStatus(order.id, uid)
   }
 
-  async modifyMode(orderId: string, dto: ModifyModeDto) {
-    const order = await this.requireWaitingOrder(orderId)
-    await this.ensureWaitingCapacity(dto.newMode)
+  async current(userId: string) {
+    const order = await this.prisma.chargingOrder.findFirst({
+      where: {
+        userId,
+        OR: [
+          { status: { in: [OrderStatus.WAITING, OrderStatus.IN_PILE_QUEUE, OrderStatus.CHARGING] } },
+          {
+            status: OrderStatus.ABORTED,
+            detail: null,
+            sessions: { some: { stopReason: 'FAULT' } }
+          }
+        ]
+      },
+      orderBy: { createdAt: 'desc' }
+    })
+    return order ? this.queueStatus(order.id, userId) : null
+  }
+
+  async modifyMode(orderId: string, dto: ModifyModeDto, userId?: string) {
+    const order = await this.requireWaitingOrder(orderId, userId)
+    if (order.chargeMode === dto.newMode) return this.queueStatus(order.id, userId)
     const updated = await this.prisma.chargingOrder.update({
       where: { id: order.id },
       data: {
@@ -55,23 +85,29 @@ export class ChargingService {
     })
     await this.queueCache.refreshMode(order.chargeMode)
     await this.queueCache.refreshMode(dto.newMode)
-    await this.dispatchService.triggerBasic(dto.newMode)
-    return this.queueStatus(updated.id)
+    await this.dispatchService.triggerBasic(dto.newMode, true)
+    return this.queueStatus(updated.id, userId)
   }
 
-  async modifyAmount(orderId: string, dto: ModifyAmountDto) {
-    const order = await this.requireWaitingOrder(orderId)
+  async modifyAmount(orderId: string, dto: ModifyAmountDto, userId?: string) {
+    const order = await this.requireWaitingOrder(orderId, userId)
+    if (userId) {
+      const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } })
+      if (dto.newAmount > user.batteryCapacity) {
+        throw new BadRequestException('Requested amount exceeds the user battery capacity.')
+      }
+    }
     const updated = await this.prisma.chargingOrder.update({
       where: { id: order.id },
       data: { requestedAmount: dto.newAmount }
     })
     await this.queueCache.refreshMode(updated.chargeMode)
-    await this.dispatchService.triggerBasic(updated.chargeMode)
-    return this.queueStatus(updated.id)
+    await this.dispatchService.triggerBasic(updated.chargeMode, true)
+    return this.queueStatus(updated.id, userId)
   }
 
-  async cancel(orderId: string, dto: CancelChargingDto) {
-    const order = await this.prisma.chargingOrder.findUniqueOrThrow({ where: { id: orderId } })
+  async cancel(orderId: string, dto: CancelChargingDto, userId?: string) {
+    const order = await this.requireOrder(orderId, userId)
     if (order.status === OrderStatus.WAITING) {
       const updated = await this.prisma.chargingOrder.update({
         where: { id: orderId },
@@ -81,7 +117,7 @@ export class ChargingService {
         }
       })
       await this.queueCache.refreshMode(order.chargeMode)
-      return this.toQueueStatus(updated, 'WAITING')
+      return this.toQueueStatus(updated, this.queueArea(updated.status))
     }
     if (order.status === OrderStatus.IN_PILE_QUEUE) {
       const pileId = order.assignedPileId
@@ -94,86 +130,71 @@ export class ChargingService {
         }
       })
       if (pileId) await this.queueCache.refreshPile(pileId)
-      await this.dispatchService.triggerBasic(order.chargeMode)
-      return this.toQueueStatus(updated, 'PILE_QUEUE')
+      await this.dispatchService.triggerBasic(order.chargeMode, true)
+      return this.toQueueStatus(updated, this.queueArea(updated.status))
     }
     if (order.status === OrderStatus.CHARGING) {
       const targetStatus = dto.reason === 'USER_STOP' || !dto.reason ? OrderStatus.FINISHED : OrderStatus.ABORTED
       const detail = await this.billingService.closeAndBill(orderId, dto.reason ?? 'USER_STOP', targetStatus)
-      await this.dispatchService.triggerBasic(order.chargeMode)
+      await this.dispatchService.triggerBasic(order.chargeMode, true)
       return detail
+    }
+    if (order.status === OrderStatus.ABORTED) {
+      // 故障中断的订单：用户放弃恢复，直接取消（已充的部分电量已在故障时结算到 session 里）
+      const updated = await this.prisma.chargingOrder.update({
+        where: { id: orderId },
+        data: {
+          status: OrderStatus.CANCELED,
+          assignedPileId: null,
+          pileQueueEnteredAt: null
+        }
+      })
+      await this.queueCache.refreshMode(order.chargeMode)
+      return this.toQueueStatus(updated, this.queueArea(updated.status))
     }
     throw new BadRequestException(`Order ${order.status} cannot be canceled.`)
   }
 
-  async queueStatus(orderId: string) {
-    const order = await this.prisma.chargingOrder.findUniqueOrThrow({
-      where: { id: orderId },
-      include: { assignedPile: true }
+  async queueStatus(orderId: string, userId?: string) {
+    const order = await this.prisma.chargingOrder.findFirst({
+      where: { id: orderId, ...(userId ? { userId } : {}) },
+      include: { assignedPile: true, detail: true, sessions: true }
     })
-    const area = this.queueArea(order.status)
+    if (!order) throw new NotFoundException(`Order ${orderId} not found.`)
+    const recoverable = order.status === OrderStatus.ABORTED
+      && !order.detail
+      && order.sessions.some((session) => session.stopReason === 'FAULT')
+    const area = recoverable ? 'FAULT_INTERRUPTED' : this.queueArea(order.status)
     const aheadCount = await this.aheadCount(order)
     const estimatedWaitTime = await this.estimatedWaitTime(order)
-    return this.toQueueStatus(order, area, aheadCount, estimatedWaitTime)
+    return { ...this.toQueueStatus(order, area, aheadCount, estimatedWaitTime), recoverable }
   }
 
-  async start(orderId: string) {
-    const order = await this.prisma.chargingOrder.findUniqueOrThrow({
-      where: { id: orderId },
-      include: { assignedPile: true }
-    })
-    if (order.status !== OrderStatus.IN_PILE_QUEUE || !order.assignedPileId || !order.assignedPile) {
-      throw new BadRequestException('Only orders at the head of a pile queue can start charging.')
-    }
-    if (order.assignedPile.physicalState !== PhysicalState.ON || order.assignedPile.workingState !== WorkingState.IDLE) {
-      throw new BadRequestException('Assigned pile is not available.')
-    }
-
-    const earlier = await this.prisma.chargingOrder.findFirst({
-      where: {
-        assignedPileId: order.assignedPileId,
-        status: OrderStatus.IN_PILE_QUEUE,
-        id: { not: order.id },
-        OR: [
-          { pileQueueEnteredAt: { lt: order.pileQueueEnteredAt ?? order.submitTime } },
-          { pileQueueEnteredAt: null, submitTime: { lt: order.submitTime } }
-        ]
-      },
-      orderBy: [{ pileQueueEnteredAt: 'asc' }, { submitTime: 'asc' }]
-    })
-    if (earlier) throw new BadRequestException('Order is not at the head of its pile queue.')
-
-    const session = await this.prisma.$transaction(async (tx) => {
-      await tx.chargingOrder.update({
-        where: { id: order.id },
-        data: { status: OrderStatus.CHARGING, startedAt: new Date() }
-      })
-      await tx.chargingPile.update({
-        where: { id: order.assignedPileId! },
-        data: { workingState: WorkingState.CHARGING }
-      })
-      return tx.chargingSession.create({
-        data: { orderId: order.id, pileId: order.assignedPileId! }
-      })
-    })
-
-    await this.queueCache.refreshPile(order.assignedPileId)
-    return { orderId, sessionId: session.id, status: OrderStatus.CHARGING, pileId: order.assignedPileId }
+  async start(orderId: string, userId?: string) {
+    return this.chargingStarter.start(orderId, userId)
   }
 
-  async stop(orderId: string) {
-    const order = await this.prisma.chargingOrder.findUniqueOrThrow({ where: { id: orderId } })
+  async stop(orderId: string, userId?: string) {
+    const order = await this.requireOrder(orderId, userId)
     if (order.status !== OrderStatus.CHARGING) throw new BadRequestException('Only CHARGING orders can be stopped.')
     const detail = await this.billingService.closeAndBill(orderId, 'USER_STOP', OrderStatus.FINISHED)
-    await this.dispatchService.triggerBasic(order.chargeMode)
+    await this.dispatchService.triggerBasic(order.chargeMode, true)
     return detail
   }
 
-  private async requireWaitingOrder(orderId: string) {
-    const order = await this.prisma.chargingOrder.findUniqueOrThrow({ where: { id: orderId } })
+  private async requireWaitingOrder(orderId: string, userId?: string) {
+    const order = await this.requireOrder(orderId, userId)
     if (order.status !== OrderStatus.WAITING) {
       throw new BadRequestException('Only WAITING orders can be modified.')
     }
+    return order
+  }
+
+  private async requireOrder(orderId: string, userId?: string) {
+    const order = await this.prisma.chargingOrder.findFirst({
+      where: { id: orderId, ...(userId ? { userId } : {}) }
+    })
+    if (!order) throw new NotFoundException(`Order ${orderId} not found.`)
     return order
   }
 
@@ -191,20 +212,29 @@ export class ChargingService {
   }
 
   private async ensureUserCanSubmit(userId: string) {
-    await this.prisma.user.findUniqueOrThrow({ where: { id: userId } })
+    const user = await this.prisma.user.findUnique({ where: { id: userId } })
+    if (!user) throw new NotFoundException(`User ${userId} not found.`)
     const existing = await this.prisma.chargingOrder.findFirst({
       where: {
         userId,
-        status: { in: [OrderStatus.WAITING, OrderStatus.IN_PILE_QUEUE, OrderStatus.CHARGING] }
+        OR: [
+          { status: { in: [OrderStatus.WAITING, OrderStatus.IN_PILE_QUEUE, OrderStatus.CHARGING] } },
+          {
+            status: OrderStatus.ABORTED,
+            detail: null,
+            sessions: { some: { stopReason: 'FAULT' } }
+          }
+        ]
       }
     })
     if (existing) throw new BadRequestException('User already has an unfinished charging order.')
+    return user
   }
 
-  private async ensureWaitingCapacity(mode: ChargeMode | string) {
+  private async ensureWaitingCapacity(_mode: ChargeMode | string) {
     const capacity = Number(this.config.get<string>('WAITING_AREA_SIZE') ?? 20)
     const count = await this.prisma.chargingOrder.count({
-      where: { chargeMode: mode as ChargeMode, status: OrderStatus.WAITING }
+      where: { status: OrderStatus.WAITING }
     })
     if (count >= capacity) throw new BadRequestException('Waiting queue is full.')
   }

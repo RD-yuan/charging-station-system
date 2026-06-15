@@ -1,9 +1,12 @@
 import { Body, Controller, Get, Inject, Param, Post } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
+import { Roles } from '../../common/decorators/roles.decorator'
 import { DispatchStrategyType } from '../../common/enums'
 import { PileService } from './pile.service'
+import { RescheduleDto } from './dto/pile.dto'
 
 @ApiTags('piles')
+@Roles('ADMIN')
 @Controller('admin/piles')
 export class PileController {
   constructor(@Inject(PileService) private readonly pileService: PileService) {}
@@ -34,8 +37,8 @@ export class PileController {
   }
 
   @Post(':pileId/reschedule')
-  reschedule(@Param('pileId') pileId: string, @Body('strategyType') strategyType: DispatchStrategyType) {
-    return this.pileService.reschedule(pileId, normalizeStrategy(strategyType))
+  reschedule(@Param('pileId') pileId: string, @Body() dto: RescheduleDto) {
+    return this.pileService.reschedule(pileId, normalizeStrategy(dto.strategyType))
   }
 
   @Post(':pileId/recover')

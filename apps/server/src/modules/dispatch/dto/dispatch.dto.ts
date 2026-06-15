@@ -1,5 +1,6 @@
 import { IsEnum, IsInt, IsPositive } from 'class-validator'
-import { ChargeMode, DispatchStrategyType } from '../../../common/enums'
+import { ChargeMode } from '@prisma/client'
+import { DispatchStrategyType } from '../../../common/enums'
 
 export class DispatchBasicDto {
   @IsEnum(ChargeMode)

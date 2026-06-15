@@ -1,7 +1,7 @@
-import { IsEnum } from 'class-validator'
+import { IsIn } from 'class-validator'
 import { DispatchStrategyType } from '../../../common/enums'
 
 export class RescheduleDto {
-  @IsEnum(DispatchStrategyType)
-  strategyType!: DispatchStrategyType
+  @IsIn([DispatchStrategyType.PRIORITY, 'PRIORITY_QUEUE', DispatchStrategyType.TIME_ORDER])
+  strategyType!: DispatchStrategyType | 'PRIORITY_QUEUE'
 }

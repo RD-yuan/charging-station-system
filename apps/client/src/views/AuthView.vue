@@ -81,10 +81,12 @@ async function handleLogin(e: Event) {
     localStorage.setItem('admin_access_token', result.accessToken)
     localStorage.setItem('admin_name', result.username)
     await router.push('/admin')
-  } catch {
-    errorMsg.value = isUserMode.value
-      ? '用户登录失败，请检查用户名和密码（演示：user_01 / user123）'
-      : '管理员登录失败（演示：admin / admin123）'
+  } catch (error) {
+    errorMsg.value = error instanceof Error
+      ? error.message
+      : isUserMode.value
+        ? '用户登录失败，请检查用户名和密码（演示：user_01 / user123）'
+        : '管理员登录失败（演示：admin / admin123）'
   } finally {
     isLoading.value = false
   }
@@ -129,8 +131,8 @@ async function handleRegister(e: Event) {
     saveUserSession(loginResult)
     successMsg.value = '注册成功，正在进入用户端...'
     setTimeout(() => void router.push('/user'), 600)
-  } catch {
-    errorMsg.value = '注册失败，用户名可能已存在'
+  } catch (error) {
+    errorMsg.value = error instanceof Error ? error.message : '注册失败，用户名可能已存在'
   } finally {
     isLoading.value = false
   }
