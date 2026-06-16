@@ -42,5 +42,10 @@ export function actionLabel(ev: EventTuple, mapping?: PileMapping): string {
     else if (ev.flag === 'T') modeText = '改慢充'
     return `变更请求 ${ev.target} ${modeText} ${amountText}`
   }
+  if (ev.action === 'D') {
+    if (ev.target === 'SINGLE_OPTIMAL') return `扩展a 单次最优调度 ${ev.flag}`
+    if (ev.target === 'BATCH_OPTIMAL') return `扩展b 批量最优调度`
+    return `扩展调度 ${ev.target}`
+  }
   return `未知事件 ${ev.action}`
 }

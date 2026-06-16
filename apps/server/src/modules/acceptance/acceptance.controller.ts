@@ -49,13 +49,23 @@ export class AcceptanceController {
   @Post('demo-single-optimal')
   @HttpCode(200)
   async demoSingleOptimal() {
-    return this.service.runSingleOptimalDemo()
+    const result = await this.service.runSingleOptimalDemo()
+    return {
+      report: result.report,
+      filename: result.filename,
+      excelBase64: result.excel.toString('base64')
+    }
   }
 
   @Post('demo-batch-optimal')
   @HttpCode(200)
   async demoBatchOptimal() {
-    return this.service.runBatchOptimalDemo()
+    const result = await this.service.runBatchOptimalDemo()
+    return {
+      report: result.report,
+      filename: result.filename,
+      excelBase64: result.excel.toString('base64')
+    }
   }
 
   @Get('health')

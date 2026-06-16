@@ -72,13 +72,15 @@ function extractCellTime(cell: ExcelJS.Cell): Date | null {
 
 function parseEventTuple(raw: string): EventTuple | null {
   const trimmed = raw.trim()
-  const match = /^\(\s*([A-Za-z]+)\s*,\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z]+)\s*,\s*([0-9.]+)\s*\)$/.exec(trimmed)
+  // 第 3 段和第 4 段都放宽为任意非逗号非括号字符
+  // 支持：A 事件的电量(数字)、C 事件的 -1、D 事件的 "-" 占位 等
+  const match = /^\(\s*([A-Za-z]+)\s*,\s*([A-Za-z0-9_]+)\s*,\s*([^,)]+)\s*,\s*([^,)]+)\s*\)$/.exec(trimmed)
   if (!match) return null
   return {
     action: match[1].toUpperCase(),
     target: match[2].toUpperCase(),
-    flag: match[3].toUpperCase(),
-    value: match[4]
+    flag: match[3].toUpperCase().trim(),
+    value: match[4].trim()
   }
 }
 
@@ -128,9 +130,11 @@ export async function parseAcceptanceEvents(buffer: Buffer): Promise<{
   const events: AcceptanceEvent[] = []
   let lastKey = ''
   sheet.eachRow((row, rowIndex) => {
-    if (rowIndex < 3) return
+    if (rowIndex < 2) return // 跳过 R1
     const timeCell = safeCellText(row.getCell(TIME_COLUMN))
     const eventCell = safeCellText(row.getCell(EVENT_COLUMN))
+    // 跳过表头行（"时刻"/"事件" 这种文本）和标题行
+    if (timeCell === '时刻' || eventCell === '事件') return
     if (!timeCell || !eventCell) return
     if (eventCell.includes('注') || eventCell === '调度结束') return
     // 跳过合并单元格的从属行
@@ -225,7 +229,7 @@ export function collectExpectedSamples(
   const byRow = new Map<number, ExpectedCell[]>()
   const allCols = [...FAST_COLUMNS, ...SLOW_COLUMNS]
   sheet.eachRow((row, rowIndex) => {
-    if (rowIndex < 3) return
+    if (rowIndex < 2) return
     const list: ExpectedCell[] = []
     for (const col of allCols) {
       if (!mapping.colToPileId.has(col)) continue
@@ -244,12 +248,19 @@ export function collectExpectedSamples(
 }
 
 /**
- * 找到给定 Excel 行所属事件的快照（每个事件占 3 行，snap.rowIndex 是事件行）。
+ * 找到给定 Excel 行所属事件的快照。
+ * 事件行号可能是 3,6,9...（主验收）或 2,5,8...（扩展调度）。
+ * 给定任意行（含 slot 行），找 ≤ rowIndex 的最大 eventRow。
  */
 function findSnapshotForRow(rowIndex: number, actual: Map<number, RowSnapshot>): RowSnapshot | null {
-  // 事件行号是 3, 6, 9, ... 也就是 3 的倍数。给定任意行，事件行 = (rowIndex / 3) * 3（向下取整到 3 的倍数）
-  const eventRow = Math.max(3, Math.floor(rowIndex / 3) * 3)
-  return actual.get(eventRow) ?? null
+  if (actual.has(rowIndex)) return actual.get(rowIndex) ?? null
+  // 向上找最多 2 行（slot 行偏差）
+  for (let delta = 1; delta <= 2; delta++) {
+    const candidate = rowIndex - delta
+    if (candidate < 1) break
+    if (actual.has(candidate)) return actual.get(candidate) ?? null
+  }
+  return null
 }
 
 export function compareExpectedVsActual(
@@ -281,8 +292,9 @@ export function compareExpectedVsActual(
         cell.diff = explainDiff(cell.expected, actualStr, cell.col)
       }
     }
-    // 把样本关联到所属事件行的报告行
-    const eventRow = Math.max(3, Math.floor(rowIndex / 3) * 3)
+    // 把样本关联到所属事件行的报告行（事件行可能是 3,6,9... 或 2,5,8...）
+    const snapForRow = findSnapshotForRow(rowIndex, actual)
+    const eventRow = snapForRow?.rowIndex ?? rowIndex
     const reportRow = reportRows.find((r) => r.rowIndex === eventRow)
     if (reportRow) reportRow.expectedSamples.push(...cells)
   }

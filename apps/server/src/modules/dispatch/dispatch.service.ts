@@ -117,44 +117,29 @@ export class DispatchService {
     const mode = payload.mode as ChargeMode
     const candidateOrders = (await this.waitingOrders(mode)).slice(0, payload.spotsCount)
     const pileQueues = await this.pileQueues(mode)
-    const response = await this.safeSchedule(
-      '/dispatch/single-optimization',
-      {
-        spots_count: payload.spotsCount,
-        mode,
-        candidate_orders: candidateOrders,
-        pile_queues: pileQueues
-      },
-      () => localBasicDispatch(candidateOrders, pileQueues)
-    )
-    const applied = await this.applyAssignments(response.assignments ?? [], mode)
+    const assignments = singleOptimalDispatch(candidateOrders, pileQueues)
+    const applied = await this.applyAssignments(assignments, mode)
     const autoStarted = await this.chargingStarter.autoStartPileHeads(
       pileQueues.map((pile) => pile.pile_id)
     )
     await this.queueCache.refreshMode(mode)
-    this.realtime.broadcast('dispatch_result', { strategy: 'SINGLE_OPTIMIZATION', mode, applied, autoStarted })
-    return { ...response, assignments: applied, autoStarted }
+    const finishTime = totalFinishTime(applied)
+    this.realtime.broadcast('dispatch_result', { strategy: 'SINGLE_OPTIMIZATION', mode, applied, autoStarted, totalFinishTime: finishTime })
+    return { applied: true, message: 'Applied local optimal dispatch strategy.', assignments: applied, autoStarted, totalFinishTime: finishTime }
   }
 
   async triggerBatchOptimization(payload: { spotsCount: number }) {
     const candidateOrders = (await this.waitingOrders()).slice(0, payload.spotsCount)
     const pileQueues = await this.pileQueues()
-    const response = await this.safeSchedule(
-      '/dispatch/batch-optimization',
-      {
-        spots_count: payload.spotsCount,
-        candidate_orders: candidateOrders,
-        pile_queues: pileQueues
-      },
-      () => localBatchDispatch(candidateOrders, pileQueues)
-    )
-    const applied = await this.applyAssignments(response.assignments ?? [])
+    const assignments = batchOptimalDispatch(candidateOrders, pileQueues)
+    const applied = await this.applyAssignments(assignments)
     const autoStarted = await this.chargingStarter.autoStartPileHeads(
       pileQueues.map((pile) => pile.pile_id)
     )
     await this.queueCache.refreshAll()
-    this.realtime.broadcast('dispatch_result', { strategy: 'BATCH_OPTIMIZATION', applied, autoStarted })
-    return { ...response, assignments: applied, autoStarted }
+    const finishTime = totalFinishTime(applied)
+    this.realtime.broadcast('dispatch_result', { strategy: 'BATCH_OPTIMIZATION', applied, autoStarted, totalFinishTime: finishTime })
+    return { applied: true, message: 'Applied local batch optimal dispatch strategy.', assignments: applied, autoStarted, totalFinishTime: finishTime }
   }
 
   /**
@@ -304,6 +289,7 @@ export class DispatchService {
   private async applyBatchAssignments(assignments: SchedulerAssignment[]) {
     const now = this.clock.millis()
     const applied: SchedulerAssignment[] = []
+    const touchedPiles = new Set<string>()
     for (const [index, assignment] of assignments.entries()) {
       const orderId = assignment.order_id ?? assignment.orderId
       const pileId = assignment.pile_id ?? assignment.pileId
@@ -315,10 +301,13 @@ export class DispatchService {
       const pile = await this.prisma.chargingPile.findUnique({ where: { id: pileId } })
       if (!pile || pile.physicalState !== PhysicalState.ON || pile.workingState === WorkingState.FAULT) continue
       const queueLength = await this.prisma.chargingOrder.count({
-        where: { assignedPileId: pileId, status: OrderStatus.IN_PILE_QUEUE }
+        where: {
+          assignedPileId: pileId,
+          status: { in: [OrderStatus.CHARGING, OrderStatus.IN_PILE_QUEUE] },
+          id: { not: orderId }
+        }
       })
-      const queueCapacity = Number(this.config.get<string>('CHARGING_QUEUE_LEN') ?? 2)
-      if (queueLength >= queueCapacity) continue
+      if (queueLength >= this.pileQueueCapacity()) continue
 
       await this.prisma.chargingOrder.update({
         where: { id: orderId },
@@ -328,13 +317,15 @@ export class DispatchService {
           pileQueueEnteredAt: new Date(now + index)
         }
       })
+      touchedPiles.add(pileId)
       applied.push({
         order_id: orderId,
         queue_no: assignment.queue_no ?? order.queueNo,
         pile_id: pileId,
-        projected_finish_time: assignment.projected_finish_time
+        projected_finish_time: assignment.projected_finish_time ?? assignment.projectedFinishTime ?? 0
       })
     }
+    await Promise.all([...touchedPiles].map((pileId) => this.queueCache.refreshPile(pileId)))
     return applied
   }
 
@@ -510,10 +501,6 @@ export function localBasicDispatch(orders: SchedulerOrder[], piles: SchedulerPil
 
 export function localTimeOrderDispatch(orders: SchedulerOrder[], piles: SchedulerPile[]) {
   return localBasicDispatch([...orders].sort((a, b) => queueNumber(a.queue_no) - queueNumber(b.queue_no)), piles)
-}
-
-function localBatchDispatch(orders: SchedulerOrder[], piles: SchedulerPile[]) {
-  return localBasicDispatch([...orders].sort((a, b) => b.requested_amount - a.requested_amount), piles)
 }
 
 function projectedFinish(order: SchedulerOrder, pile: SchedulerPile) {

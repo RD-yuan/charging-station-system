@@ -119,22 +119,25 @@ const demoStatus = ref('点击按钮在现有订单上触发扩展调度策略�
 
 async function runSingleOptimalDemo() {
   demoLoading.value = true
-  demoStatus.value = '正在执行单次最优调度完整演示（清场→创建场景→调度→对比）...'
+  demoStatus.value = '正在加载 扩展调度-单次最优-测试用例.xlsx 并执行（17 个事件）...'
   try {
     const res = await apiRequest<{
-      strategy: string
-      scenario: string
-      expected: Array<{ vehicle: string; pile: string; finishTime: number }>
-      actual: Array<{ vehicle: string; pile: string; finishTime: number }>
-      expectedTotal: number
-      actualTotal: number
-      pass: boolean
+      report: Report
+      filename: string
+      excelBase64: string
     }>('/admin/acceptance/demo-single-optimal', { method: 'POST' }, 'admin')
-    const exp = res.expected.map((e) => `${e.vehicle}→${e.pile}(${e.finishTime}h)`).join(', ')
-    const act = res.actual.map((a) => `${a.vehicle}→${a.pile}(${a.finishTime}h)`).join(', ')
-    demoStatus.value = `[a] ${res.pass ? '✓ 通过' : '✗ 差异'} | 期望总完工 ${res.expectedTotal.toFixed(2)}h | 实际 ${res.actualTotal.toFixed(2)}h
-       期望: ${exp}
-       实际: ${act}`
+    report.value = res.report
+    const binary = atob(res.excelBase64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    if (downloadUrl.value) URL.revokeObjectURL(downloadUrl.value)
+    downloadBlob.value = new Blob([bytes], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    })
+    downloadUrl.value = URL.createObjectURL(downloadBlob.value)
+    downloadFilename.value = res.filename
+    const r = res.report
+    demoStatus.value = `[a] 完成 | 事件 ${r.executedEvents}/${r.totalEvents}（错误 ${r.erroredEvents}）| 样本通过率 ${r.summary.passRate} | 已生成结果 Excel，点上方下载`
   } catch (err) {
     demoStatus.value = `失败：${err instanceof Error ? err.message : String(err)}`
   } finally {
@@ -144,24 +147,25 @@ async function runSingleOptimalDemo() {
 
 async function runBatchOptimalDemo() {
   demoLoading.value = true
-  demoStatus.value = '正在执行批量最优调度完整演示（25 辆车场景）...'
+  demoStatus.value = '正在加载 扩展调度-批量最优-测试用例.xlsx 并执行（26 个事件）...'
   try {
     const res = await apiRequest<{
-      strategy: string
-      scenario: string
-      expected: Array<{ vehicle: string; pile: string; finishTime: number; inWaiting?: boolean }>
-      actual: Array<{ vehicle: string; pile: string; finishTime: number; inWaiting?: boolean }>
-      expectedTotal: number
-      actualTotal: number
-      pass: boolean
+      report: Report
+      filename: string
+      excelBase64: string
     }>('/admin/acceptance/demo-batch-optimal', { method: 'POST' }, 'admin')
-    const expAssigned = res.expected.filter((e) => !e.inWaiting)
-    const actAssigned = res.actual.filter((a) => !a.inWaiting)
-    const expWaiting = res.expected.filter((e) => e.inWaiting).map((e) => e.vehicle).join(',')
-    const actWaiting = res.actual.filter((a) => a.inWaiting).map((a) => a.vehicle).join(',')
-    demoStatus.value = `[b] ${res.pass ? '✓ 通过' : '✗ 差异'} | 派出 ${actAssigned.length}/${expAssigned.length} | 期望总完工 ${res.expectedTotal.toFixed(2)}h | 实际 ${res.actualTotal.toFixed(2)}h
-       期望等候区(10): ${expWaiting}
-       实际等候区(${res.actual.filter((a) => a.inWaiting).length}): ${actWaiting}`
+    report.value = res.report
+    const binary = atob(res.excelBase64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    if (downloadUrl.value) URL.revokeObjectURL(downloadUrl.value)
+    downloadBlob.value = new Blob([bytes], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    })
+    downloadUrl.value = URL.createObjectURL(downloadBlob.value)
+    downloadFilename.value = res.filename
+    const r = res.report
+    demoStatus.value = `[b] 完成 | 事件 ${r.executedEvents}/${r.totalEvents}（错误 ${r.erroredEvents}）| 样本通过率 ${r.summary.passRate} | 已生成结果 Excel，点上方下载`
   } catch (err) {
     demoStatus.value = `失败：${err instanceof Error ? err.message : String(err)}`
   } finally {
