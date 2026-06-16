@@ -1,4 +1,4 @@
-import { Body, Controller, Inject, Param, ParseEnumPipe, Post } from '@nestjs/common'
+import { Body, Controller, Inject, Param, ParseEnumPipe, Post, Query } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
 import { ChargeMode } from '@prisma/client'
 import { DispatchStrategyType } from '../../common/enums'
@@ -30,6 +30,18 @@ export class DispatchController {
   @Post('batch-optimization')
   batch(@Body() dto: BatchOptimizationDto) {
     return this.dispatchService.triggerBatchOptimization(dto)
+  }
+
+  /** 扩展 a：单次最优调度（同模式，最小化总完工时间） */
+  @Post('single-optimal/:mode')
+  singleOptimal(@Param('mode', new ParseEnumPipe(ChargeMode)) mode: ChargeMode) {
+    return this.dispatchService.triggerSingleOptimal(mode)
+  }
+
+  /** 扩展 b：批量最优调度（无模式约束，最小化总完工时间） */
+  @Post('batch-optimal')
+  batchOptimal(@Query('force') force?: string) {
+    return this.dispatchService.triggerBatchOptimal(force === 'true' || force === '1')
   }
 }
 

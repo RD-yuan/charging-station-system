@@ -8,6 +8,7 @@ import { RealtimeService } from '../../realtime/realtime.service'
 import { QueueCacheService } from '../queue/queue-cache.service'
 import { ChargingStarterService } from '../charging/charging-starter.service'
 import { HttpSchedulerClient } from './http-scheduler.client'
+import { batchOptimalDispatch, singleOptimalDispatch, totalFinishTime } from './optimal-dispatch.strategy'
 
 export interface SchedulerOrder {
   order_id: string
@@ -154,6 +155,187 @@ export class DispatchService {
     await this.queueCache.refreshAll()
     this.realtime.broadcast('dispatch_result', { strategy: 'BATCH_OPTIMIZATION', applied, autoStarted })
     return { ...response, assignments: applied, autoStarted }
+  }
+
+  /**
+   * 扩展 a：单次最优调度。
+   * 同模式约束下，最小化所有车"完工时间"之和。
+   * 触发场景：充电区多个空位同时出现时，一次叫多辆车进入充电区。
+   */
+  async triggerSingleOptimal(mode: ChargeMode) {
+    const waitingOrders = await this.waitingOrders(mode)
+    const pileQueues = await this.pileQueues(mode)
+    const freeSlots = pileQueues.reduce(
+      (sum, p) => sum + Math.max(0, p.queue_capacity - p.queued_orders.length),
+      0
+    )
+
+    if (waitingOrders.length === 0) {
+      return {
+        strategy: 'SINGLE_OPTIMAL',
+        mode,
+        triggered: false,
+        reason: `没有 WAITING 状态的 ${mode} 订单可调度（当前 WAITING=0，${mode} 桩空位=${freeSlots}）`,
+        assignments: [],
+        totalFinishTime: 0,
+        waitingCount: 0,
+        freeSlots
+      }
+    }
+    if (freeSlots === 0) {
+      return {
+        strategy: 'SINGLE_OPTIMAL',
+        mode,
+        triggered: false,
+        reason: `${mode} 桩已全部占满（${pileQueues.length} 个桩 × ${pileQueues[0]?.queue_capacity ?? 0} 席位），没有空位可派。请先取消某个订单或触发故障让出 slot`,
+        assignments: [],
+        totalFinishTime: 0,
+        waitingCount: waitingOrders.length,
+        freeSlots: 0
+      }
+    }
+
+    const assignments = singleOptimalDispatch(waitingOrders, pileQueues)
+    const applied = await this.applyAssignments(assignments, mode)
+    const autoStarted = await this.chargingStarter.autoStartPileHeads(
+      pileQueues.map((p) => p.pile_id)
+    )
+    await this.queueCache.refreshMode(mode)
+    this.realtime.broadcast('dispatch_result', {
+      strategy: 'SINGLE_OPTIMAL',
+      mode,
+      applied,
+      autoStarted,
+      totalFinishTime: totalFinishTime(applied)
+    })
+    return {
+      strategy: 'SINGLE_OPTIMAL',
+      mode,
+      triggered: true,
+      assignments: applied,
+      autoStarted,
+      totalFinishTime: totalFinishTime(applied),
+      waitingCount: waitingOrders.length,
+      freeSlots
+    }
+  }
+
+  /**
+   * 扩展 b：批量最优调度。
+   * 无模式约束，最小化所有车"完工时间"之和。
+   * 触发场景：到达车辆 == 全部车位数（充电区 + 等候区）时一次性批量调度。
+   *
+   * @param force 即使触发条件不满足也强制执行（用于演示）
+   */
+  async triggerBatchOptimal(force = false) {
+    const totalSlots = await this.computeTotalSlots()
+    const allWaiting = await this.waitingOrders()
+    const allCharging = await this.prisma.chargingOrder.count({
+      where: { status: { in: [OrderStatus.CHARGING, OrderStatus.IN_PILE_QUEUE] } }
+    })
+    const arrivedCount = allWaiting.length + allCharging
+    const triggerMet = arrivedCount >= totalSlots
+
+    if (!triggerMet && !force) {
+      return {
+        strategy: 'BATCH_OPTIMAL',
+        triggered: false,
+        reason: `触发条件未满足：当前 ${arrivedCount} 辆车，需要 ${totalSlots} 辆（充电区 ${totalSlots - this.waitingAreaSize()} + 等候区 ${this.waitingAreaSize()}）`,
+        arrivedCount,
+        totalSlots
+      }
+    }
+
+    // 批量调度前：把所有 IN_PILE_QUEUE 也搬回 WAITING，确保从干净状态开始全局最优
+    const inPileQueueOrders = await this.prisma.chargingOrder.findMany({
+      where: { status: OrderStatus.IN_PILE_QUEUE },
+      select: { id: true }
+    })
+    if (inPileQueueOrders.length > 0) {
+      await this.prisma.chargingOrder.updateMany({
+        where: { id: { in: inPileQueueOrders.map((o) => o.id) } },
+        data: { status: OrderStatus.WAITING, assignedPileId: null, pileQueueEnteredAt: null }
+      })
+    }
+    const waitingAfterReset = await this.waitingOrders()
+    const pileQueues = await this.pileQueues()
+    const assignments = batchOptimalDispatch(waitingAfterReset, pileQueues)
+
+    // applyAssignments 内部按 mode 过滤，批量场景需要绕过这个过滤
+    const applied = await this.applyBatchAssignments(assignments)
+    const autoStarted = await this.chargingStarter.autoStartPileHeads(
+      pileQueues.map((p) => p.pile_id)
+    )
+    await Promise.all([
+      this.queueCache.refreshMode(ChargeMode.FAST),
+      this.queueCache.refreshMode(ChargeMode.SLOW)
+    ])
+    this.realtime.broadcast('dispatch_result', {
+      strategy: 'BATCH_OPTIMAL',
+      applied,
+      autoStarted,
+      totalFinishTime: totalFinishTime(applied)
+    })
+    return {
+      strategy: 'BATCH_OPTIMAL',
+      triggered: true,
+      assignments: applied,
+      autoStarted,
+      totalFinishTime: totalFinishTime(applied),
+      arrivedCount,
+      totalSlots
+    }
+  }
+
+  private waitingAreaSize(): number {
+    return Number(this.config.get<string>('WAITING_AREA_SIZE') ?? 10)
+  }
+
+  private async computeTotalSlots(): Promise<number> {
+    const pileCapacity = Number(this.config.get<string>('CHARGING_QUEUE_LEN') ?? 2)
+    const pileCount = await this.prisma.chargingPile.count()
+    return pileCount * pileCapacity + this.waitingAreaSize()
+  }
+
+  /**
+   * 批量调度的应用：不做 mode 过滤（任何车可去任何桩）。
+   * 现有 applyAssignments 会按 mode 过滤，所以单独实现。
+   */
+  private async applyBatchAssignments(assignments: SchedulerAssignment[]) {
+    const now = this.clock.millis()
+    const applied: SchedulerAssignment[] = []
+    for (const [index, assignment] of assignments.entries()) {
+      const orderId = assignment.order_id ?? assignment.orderId
+      const pileId = assignment.pile_id ?? assignment.pileId
+      if (!orderId || !pileId) continue
+
+      const order = await this.prisma.chargingOrder.findUnique({ where: { id: orderId } })
+      if (!order || order.status === OrderStatus.CHARGING || isTerminal(order.status)) continue
+
+      const pile = await this.prisma.chargingPile.findUnique({ where: { id: pileId } })
+      if (!pile || pile.physicalState !== PhysicalState.ON || pile.workingState === WorkingState.FAULT) continue
+      const queueLength = await this.prisma.chargingOrder.count({
+        where: { assignedPileId: pileId, status: OrderStatus.IN_PILE_QUEUE }
+      })
+      const queueCapacity = Number(this.config.get<string>('CHARGING_QUEUE_LEN') ?? 2)
+      if (queueLength >= queueCapacity) continue
+
+      await this.prisma.chargingOrder.update({
+        where: { id: orderId },
+        data: {
+          status: OrderStatus.IN_PILE_QUEUE,
+          assignedPileId: pileId,
+          pileQueueEnteredAt: new Date(now + index)
+        }
+      })
+      applied.push({
+        order_id: orderId,
+        queue_no: assignment.queue_no ?? order.queueNo,
+        pile_id: pileId,
+        projected_finish_time: assignment.projected_finish_time
+      })
+    }
+    return applied
   }
 
   async triggerRecoveryReschedule(pileId: string) {

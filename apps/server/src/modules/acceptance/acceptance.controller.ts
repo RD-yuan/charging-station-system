@@ -46,6 +46,18 @@ export class AcceptanceController {
     return { ok: true, message: '已清空订单/会话/账单与测试用户，重置充电桩状态。' }
   }
 
+  @Post('demo-single-optimal')
+  @HttpCode(200)
+  async demoSingleOptimal() {
+    return this.service.runSingleOptimalDemo()
+  }
+
+  @Post('demo-batch-optimal')
+  @HttpCode(200)
+  async demoBatchOptimal() {
+    return this.service.runBatchOptimalDemo()
+  }
+
   @Get('health')
   health() {
     return { ok: true, ts: new Date().toISOString() }

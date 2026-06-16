@@ -20,6 +20,8 @@
 
 ## 目录结构
 
+好的，现在请你细致分析扩展调度的两个测试用例，计算预期结果是怎样的
+
 ```text
 charging-station-system/
   apps/

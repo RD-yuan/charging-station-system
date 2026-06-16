@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { ChargeMode, OrderStatus, PhysicalState, WorkingState } from '@prisma/client'
 import * as bcrypt from 'bcryptjs'
 import { ClockService } from '../../common/clock.service'
@@ -55,7 +56,8 @@ export class AcceptanceService {
     @Inject(PileService) private readonly pileService: PileService,
     @Inject(DispatchService) private readonly dispatch: DispatchService,
     @Inject(QueueCacheService) private readonly queueCache: QueueCacheService,
-    @Inject(ClockService) private readonly clock: ClockService
+    @Inject(ClockService) private readonly clock: ClockService,
+    @Inject(ConfigService) private readonly config: ConfigService
   ) {}
 
   async run(input: { fileBuffer?: Buffer; stopAtLimit?: boolean }): Promise<{
@@ -150,6 +152,286 @@ export class AcceptanceService {
       }
     })
     await this.queueCache.refreshAll(false)
+  }
+
+  /**
+   * 扩展 a 演示：单次最优调度（SPT）。
+   * 流程：清场 → 创建 4 个 FAST 用户 → 用 6 个"填充订单"占满 F1/F2 →
+   *      提交 4 个目标订单（被迫进 WAITING）→ 取消填充订单腾出 6 个 slot →
+   *      触发 singleOptimalDispatch → 读回实际分配 → 与期望对比。
+   */
+  async runSingleOptimalDemo(): Promise<{
+    strategy: string
+    scenario: string
+    expected: Array<{ vehicle: string; pile: string; finishTime: number }>
+    actual: Array<{ vehicle: string; pile: string; finishTime: number }>
+    expectedTotal: number
+    actualTotal: number
+    pass: boolean
+  }> {
+    await this.resetWorld()
+
+    const targetOrders = [
+      { vehicle: 'V1', amount: 30 },
+      { vehicle: 'V2', amount: 60 },
+      { vehicle: 'V3', amount: 90 },
+      { vehicle: 'V4', amount: 120 }
+    ]
+    const fillerCount = 6 // 占满 F1+F2 共 6 slot
+    const fastPiles = await this.prisma.chargingPile.findMany({
+      where: { pileType: 'FAST' as ChargeMode },
+      orderBy: { id: 'asc' }
+    })
+    const fastCapacity = fastPiles.length * Number(this.config.get<string>('CHARGING_QUEUE_LEN') ?? 2)
+
+    // 1. 创建 4 个目标用户 + N 个填充用户
+    for (const t of targetOrders) {
+      await this.ensureDemoUser(t.vehicle)
+    }
+    for (let i = 1; i <= fillerCount; i++) {
+      await this.ensureDemoUser(`FILLER_${i}`)
+    }
+
+    // 2. 先提交填充订单（占满 FAST 桩）
+    for (let i = 1; i <= fillerCount; i++) {
+      const u = await this.findUser(`FILLER_${i}`)
+      if (u) await this.charging.submitRequest({ chargeMode: 'FAST' as ChargeMode, requestedAmount: 10, userId: u.id })
+    }
+
+    // 3. 提交 4 个目标订单（它们会进 WAITING，因为 FAST 桩已满）
+    const targetUserMap = new Map<string, string>()
+    for (const t of targetOrders) {
+      const u = await this.findUser(t.vehicle)
+      if (u) {
+        targetUserMap.set(t.vehicle, u.id)
+        await this.charging.submitRequest({ chargeMode: 'FAST' as ChargeMode, requestedAmount: t.amount, userId: u.id })
+      }
+    }
+
+    // 4. 取消所有填充订单（让出 slot，状态回 WAITING 区的 4 个目标订单保持不变）
+    const fillers = await this.prisma.chargingOrder.findMany({
+      where: { user: { username: { startsWith: 'accept_v_filler_' } }, status: { in: [OrderStatus.IN_PILE_QUEUE, OrderStatus.CHARGING] } }
+    })
+    for (const f of fillers) {
+      try { await this.charging.cancel(f.id, { reason: 'USER_STOP' }) } catch {}
+    }
+
+    // 5. 触发单次最优调度
+    const result = await this.dispatch.triggerSingleOptimal('FAST' as ChargeMode)
+
+    // 6. 读回实际分配
+    const actual: Array<{ vehicle: string; pile: string; finishTime: number }> = []
+    for (const t of targetOrders) {
+      const uid = targetUserMap.get(t.vehicle)
+      if (!uid) continue
+      const order = await this.prisma.chargingOrder.findFirst({
+        where: { userId: uid, status: OrderStatus.IN_PILE_QUEUE },
+        include: { assignedPile: true, sessions: true }
+      })
+      if (!order || !order.assignedPile) {
+        actual.push({ vehicle: t.vehicle, pile: '(未分配)', finishTime: 0 })
+        continue
+      }
+      // 计算完工时间：(队前电量 + 自身电量) / power
+      const queueAhead = await this.prisma.chargingOrder.count({
+        where: {
+          assignedPileId: order.assignedPileId,
+          status: OrderStatus.IN_PILE_QUEUE,
+          OR: [
+            { pileQueueEnteredAt: { lt: order.pileQueueEnteredAt ?? new Date(0) } },
+            { id: order.id }
+          ]
+        }
+      })
+      const aheadOrders = await this.prisma.chargingOrder.findMany({
+        where: {
+          assignedPileId: order.assignedPileId,
+          status: { in: [OrderStatus.IN_PILE_QUEUE, OrderStatus.CHARGING] },
+          pileQueueEnteredAt: { lt: order.pileQueueEnteredAt ?? new Date(0) }
+        }
+      })
+      const aheadAmount = aheadOrders.reduce((s, o) => s + o.requestedAmount, 0)
+      const finishTime = (aheadAmount + t.amount) / order.assignedPile.power
+      actual.push({
+        vehicle: t.vehicle,
+        pile: order.assignedPile.id,
+        finishTime: Math.round(finishTime * 100) / 100
+      })
+    }
+
+    // 7. 期望（SPT 规则）：V1→F1(1h), V2→F2(2h), V3→F1(4h), V4→F2(6h)
+    const expected = [
+      { vehicle: 'V1', pile: fastPiles[0]?.id ?? 'F1', finishTime: 1 },
+      { vehicle: 'V2', pile: fastPiles[1]?.id ?? 'F2', finishTime: 2 },
+      { vehicle: 'V3', pile: fastPiles[0]?.id ?? 'F1', finishTime: 4 },
+      { vehicle: 'V4', pile: fastPiles[1]?.id ?? 'F2', finishTime: 6 }
+    ]
+    const expectedTotal = expected.reduce((s, e) => s + e.finishTime, 0)
+    const actualTotal = actual.reduce((s, a) => s + a.finishTime, 0)
+
+    return {
+      strategy: 'SINGLE_OPTIMAL_DEMO',
+      scenario: `4 辆 FAST 车 (V1=30, V2=60, V3=90, V4=120 度) + 2 个 FAST 桩（${fastPiles.map((p) => p.id).join(',')}，均 ${fastPiles[0]?.power} 度/h）`,
+      expected,
+      actual,
+      expectedTotal,
+      actualTotal,
+      pass: Math.abs(expectedTotal - actualTotal) < 0.01
+    }
+  }
+
+  /**
+   * 扩展 b 演示：批量最优调度。
+   * 流程：清场 → 创建 25 个用户 → 提交 25 个混合 F/T 订单 →
+   *      触发 batchOptimalDispatch → 读回实际分配 → 与期望对比。
+   */
+  async runBatchOptimalDemo(): Promise<{
+    strategy: string
+    scenario: string
+    expected: Array<{ vehicle: string; pile: string; finishTime: number; inWaiting?: boolean }>
+    actual: Array<{ vehicle: string; pile: string; finishTime: number; inWaiting?: boolean }>
+    expectedTotal: number
+    actualTotal: number
+    pass: boolean
+  }> {
+    await this.resetWorld()
+
+    // 25 辆车（13 F + 12 T），来自测试用例 Excel
+    const vehicles = [
+      { v: 'V1', amt: 100, mode: 'F' as const }, { v: 'V2', amt: 30, mode: 'T' as const },
+      { v: 'V3', amt: 90, mode: 'F' as const },  { v: 'V4', amt: 20, mode: 'T' as const },
+      { v: 'V5', amt: 110, mode: 'F' as const }, { v: 'V6', amt: 15, mode: 'T' as const },
+      { v: 'V7', amt: 80, mode: 'F' as const },  { v: 'V8', amt: 25, mode: 'T' as const },
+      { v: 'V9', amt: 60, mode: 'F' as const },  { v: 'V10', amt: 10, mode: 'T' as const },
+      { v: 'V11', amt: 70, mode: 'F' as const }, { v: 'V12', amt: 35, mode: 'T' as const },
+      { v: 'V13', amt: 50, mode: 'F' as const }, { v: 'V14', amt: 40, mode: 'T' as const },
+      { v: 'V15', amt: 95, mode: 'F' as const }, { v: 'V16', amt: 5, mode: 'T' as const },
+      { v: 'V17', amt: 85, mode: 'F' as const }, { v: 'V18', amt: 45, mode: 'T' as const },
+      { v: 'V19', amt: 75, mode: 'F' as const }, { v: 'V20', amt: 20, mode: 'T' as const },
+      { v: 'V21', amt: 65, mode: 'F' as const }, { v: 'V22', amt: 30, mode: 'T' as const },
+      { v: 'V23', amt: 55, mode: 'F' as const }, { v: 'V24', amt: 15, mode: 'T' as const },
+      { v: 'V25', amt: 105, mode: 'F' as const }
+    ]
+
+    // 创建用户 + 提交订单
+    const userMap = new Map<string, string>()
+    for (const x of vehicles) {
+      await this.ensureDemoUser(x.v)
+      const u = await this.findUser(x.v)
+      if (u) userMap.set(x.v, u.id)
+    }
+    for (const x of vehicles) {
+      const uid = userMap.get(x.v)
+      if (uid) {
+        await this.charging.submitRequest({
+          chargeMode: x.mode === 'F' ? 'FAST' as ChargeMode : 'SLOW' as ChargeMode,
+          requestedAmount: x.amt,
+          userId: uid
+        })
+      }
+    }
+
+    // 触发批量最优
+    await this.dispatch.triggerBatchOptimal(true)
+
+    // 读回实际分配
+    const actual: Array<{ vehicle: string; pile: string; finishTime: number; inWaiting?: boolean }> = []
+    for (const x of vehicles) {
+      const uid = userMap.get(x.v)
+      if (!uid) continue
+      const order = await this.prisma.chargingOrder.findFirst({
+        where: { userId: uid, status: { in: [OrderStatus.WAITING, OrderStatus.IN_PILE_QUEUE] } },
+        include: { assignedPile: true }
+      })
+      if (!order) {
+        actual.push({ vehicle: x.v, pile: '(未找到)', finishTime: 0 })
+        continue
+      }
+      if (order.status === OrderStatus.WAITING) {
+        actual.push({ vehicle: x.v, pile: '等候区', finishTime: 0, inWaiting: true })
+        continue
+      }
+      if (!order.assignedPile) {
+        actual.push({ vehicle: x.v, pile: '(未分配)', finishTime: 0 })
+        continue
+      }
+      const aheadOrders = await this.prisma.chargingOrder.findMany({
+        where: {
+          assignedPileId: order.assignedPileId,
+          status: { in: [OrderStatus.IN_PILE_QUEUE, OrderStatus.CHARGING] },
+          pileQueueEnteredAt: { lt: order.pileQueueEnteredAt ?? new Date(0) }
+        }
+      })
+      const aheadAmount = aheadOrders.reduce((s, o) => s + o.requestedAmount, 0)
+      const finishTime = (aheadAmount + x.amt) / order.assignedPile.power
+      actual.push({
+        vehicle: x.v,
+        pile: order.assignedPile.id,
+        finishTime: Math.round(finishTime * 100) / 100
+      })
+    }
+
+    // 期望（按 SPT 算法预先算出的最优分配）
+    const expected = [
+      { vehicle: 'V16', pile: '最快F桩', finishTime: 0.17 },
+      { vehicle: 'V10', pile: '次快F桩', finishTime: 0.33 },
+      { vehicle: 'V6', pile: '最快F桩', finishTime: 0.67 },
+      { vehicle: 'V24', pile: '次快F桩', finishTime: 0.83 },
+      { vehicle: 'V4', pile: '最快F桩', finishTime: 1.33 },
+      { vehicle: 'V20', pile: '次快F桩', finishTime: 1.5 },
+      { vehicle: 'V8', pile: 'T桩#1', finishTime: 2.5 },
+      { vehicle: 'V2', pile: 'T桩#2', finishTime: 3.0 },
+      { vehicle: 'V22', pile: 'T桩#3', finishTime: 3.0 },
+      { vehicle: 'V12', pile: 'T桩#1', finishTime: 6.0 },
+      { vehicle: 'V14', pile: 'T桩#2', finishTime: 7.0 },
+      { vehicle: 'V18', pile: 'T桩#3', finishTime: 7.5 },
+      { vehicle: 'V13', pile: 'T桩#1', finishTime: 11.0 },
+      { vehicle: 'V23', pile: 'T桩#2', finishTime: 12.5 },
+      { vehicle: 'V9', pile: 'T桩#3', finishTime: 13.5 },
+      // 等候区（10 辆大单）
+      { vehicle: 'V21', pile: '等候区', finishTime: 0, inWaiting: true },
+      { vehicle: 'V11', pile: '等候区', finishTime: 0, inWaiting: true },
+      { vehicle: 'V19', pile: '等候区', finishTime: 0, inWaiting: true },
+      { vehicle: 'V7', pile: '等候区', finishTime: 0, inWaiting: true },
+      { vehicle: 'V17', pile: '等候区', finishTime: 0, inWaiting: true },
+      { vehicle: 'V3', pile: '等候区', finishTime: 0, inWaiting: true },
+      { vehicle: 'V15', pile: '等候区', finishTime: 0, inWaiting: true },
+      { vehicle: 'V1', pile: '等候区', finishTime: 0, inWaiting: true },
+      { vehicle: 'V25', pile: '等候区', finishTime: 0, inWaiting: true },
+      { vehicle: 'V5', pile: '等候区', finishTime: 0, inWaiting: true }
+    ]
+    const expectedTotal = 70.83
+    const actualTotal = actual.filter((a) => !a.inWaiting).reduce((s, a) => s + a.finishTime, 0)
+
+    return {
+      strategy: 'BATCH_OPTIMAL_DEMO',
+      scenario: `25 辆车（混合 F/T），5 桩（F1/F2=30度/h, T1/T2/T3=10度/h），每桩 3 席位 + 10 等候`,
+      expected,
+      actual,
+      expectedTotal,
+      actualTotal,
+      pass: Math.abs(expectedTotal - actualTotal) < 1.0
+    }
+  }
+
+  private async ensureDemoUser(vehicleId: string): Promise<void> {
+    const username = `accept_v_${vehicleId.toLowerCase()}`
+    const existing = await this.prisma.user.findUnique({ where: { username } })
+    if (existing) return
+    const bcrypt = await import('bcryptjs')
+    await this.prisma.user.create({
+      data: {
+        username,
+        passwordHash: await bcrypt.hash(VEHICLE_PASSWORD, 10),
+        role: 'USER' as const,
+        batteryCapacity: 200
+      }
+    })
+  }
+
+  private async findUser(vehicleId: string): Promise<{ id: string } | null> {
+    const username = `accept_v_${vehicleId.toLowerCase()}`
+    return this.prisma.user.findUnique({ where: { username }, select: { id: true } })
   }
 
   /**

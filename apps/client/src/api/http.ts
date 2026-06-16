@@ -1,4 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api'
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ??
+  `${location.protocol}//${location.hostname}:3000/api`
 
 type TokenRole = 'admin' | 'user'
 
@@ -61,5 +63,8 @@ async function parseErrorMessage(response: Response) {
 }
 
 export function wsUrl() {
-  return import.meta.env.VITE_WS_URL ?? 'ws://localhost:3000/ws/station'
+  return (
+    import.meta.env.VITE_WS_URL ??
+    `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:3000/ws/station`
+  )
 }

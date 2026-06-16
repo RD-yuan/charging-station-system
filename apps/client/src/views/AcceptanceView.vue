@@ -40,7 +40,9 @@ interface Report {
   }
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api'
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ??
+  `${location.protocol}//${location.hostname}:3000/api`
 const selectedFile = ref<File | null>(null)
 const running = ref(false)
 const error = ref('')
@@ -109,6 +111,61 @@ async function runTests() {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
     running.value = false
+  }
+}
+
+const demoLoading = ref(false)
+const demoStatus = ref('点击按钮在现有订单上触发扩展调度策略，对比总完工时间')
+
+async function runSingleOptimalDemo() {
+  demoLoading.value = true
+  demoStatus.value = '正在执行单次最优调度完整演示（清场→创建场景→调度→对比）...'
+  try {
+    const res = await apiRequest<{
+      strategy: string
+      scenario: string
+      expected: Array<{ vehicle: string; pile: string; finishTime: number }>
+      actual: Array<{ vehicle: string; pile: string; finishTime: number }>
+      expectedTotal: number
+      actualTotal: number
+      pass: boolean
+    }>('/admin/acceptance/demo-single-optimal', { method: 'POST' }, 'admin')
+    const exp = res.expected.map((e) => `${e.vehicle}→${e.pile}(${e.finishTime}h)`).join(', ')
+    const act = res.actual.map((a) => `${a.vehicle}→${a.pile}(${a.finishTime}h)`).join(', ')
+    demoStatus.value = `[a] ${res.pass ? '✓ 通过' : '✗ 差异'} | 期望总完工 ${res.expectedTotal.toFixed(2)}h | 实际 ${res.actualTotal.toFixed(2)}h
+       期望: ${exp}
+       实际: ${act}`
+  } catch (err) {
+    demoStatus.value = `失败：${err instanceof Error ? err.message : String(err)}`
+  } finally {
+    demoLoading.value = false
+  }
+}
+
+async function runBatchOptimalDemo() {
+  demoLoading.value = true
+  demoStatus.value = '正在执行批量最优调度完整演示（25 辆车场景）...'
+  try {
+    const res = await apiRequest<{
+      strategy: string
+      scenario: string
+      expected: Array<{ vehicle: string; pile: string; finishTime: number; inWaiting?: boolean }>
+      actual: Array<{ vehicle: string; pile: string; finishTime: number; inWaiting?: boolean }>
+      expectedTotal: number
+      actualTotal: number
+      pass: boolean
+    }>('/admin/acceptance/demo-batch-optimal', { method: 'POST' }, 'admin')
+    const expAssigned = res.expected.filter((e) => !e.inWaiting)
+    const actAssigned = res.actual.filter((a) => !a.inWaiting)
+    const expWaiting = res.expected.filter((e) => e.inWaiting).map((e) => e.vehicle).join(',')
+    const actWaiting = res.actual.filter((a) => a.inWaiting).map((a) => a.vehicle).join(',')
+    demoStatus.value = `[b] ${res.pass ? '✓ 通过' : '✗ 差异'} | 派出 ${actAssigned.length}/${expAssigned.length} | 期望总完工 ${res.expectedTotal.toFixed(2)}h | 实际 ${res.actualTotal.toFixed(2)}h
+       期望等候区(10): ${expWaiting}
+       实际等候区(${res.actual.filter((a) => a.inWaiting).length}): ${actWaiting}`
+  } catch (err) {
+    demoStatus.value = `失败：${err instanceof Error ? err.message : String(err)}`
+  } finally {
+    demoLoading.value = false
   }
 }
 
@@ -186,6 +243,22 @@ function statusClass(status: string) {
           <input type="checkbox" v-model="stopAtLimit" />
           <span>按说明停在 9:30（仅执行 6:00–9:30 事件）</span>
         </label>
+        <div class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+          <div class="text-[11px] font-bold text-amber-900 mb-1">扩展调度演示（PS 选做）</div>
+          <div class="flex gap-2">
+            <button
+              class="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-white text-[11px] font-bold rounded disabled:opacity-40"
+              :disabled="demoLoading"
+              @click="runSingleOptimalDemo"
+            >a) 单次最优调度(FAST)</button>
+            <button
+              class="px-3 py-1.5 bg-orange-500 hover:bg-orange-400 text-white text-[11px] font-bold rounded disabled:opacity-40"
+              :disabled="demoLoading"
+              @click="runBatchOptimalDemo"
+            >b) 批量最优调度</button>
+          </div>
+          <p class="text-[10px] text-amber-800 mt-1">{{ demoStatus }}</p>
+        </div>
         <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
           <p>事件语义（5 分钟一格，E=(类型,id,充电类型,数值)）：</p>
           <p>· <code>A,V*,F/T,度</code> → 申请充电（F=快/T=慢）</p>
