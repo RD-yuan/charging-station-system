@@ -238,25 +238,27 @@ async function cancelCharging() {
 }
 
 const statusColor: Record<string, string> = {
-  WAITING: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  IN_PILE_QUEUE: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  CHARGING: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  FINISHED: 'bg-slate-500/10 text-slate-300 border-slate-500/20',
-  CANCELED: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
-  ABORTED: 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+  WAITING: 'bg-amber-50 text-amber-800 border-amber-200',
+  IN_PILE_QUEUE: 'bg-blue-50 text-blue-800 border-blue-200',
+  CHARGING: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  FINISHED: 'bg-slate-100 text-slate-700 border-slate-200',
+  CANCELED: 'bg-rose-50 text-rose-700 border-rose-200',
+  ABORTED: 'bg-rose-50 text-rose-700 border-rose-200'
 }
 </script>
 
 <template>
   <div class="space-y-6">
-    <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
+    <div class="view-header">
       <div>
-        <h2 class="text-2xl font-bold text-slate-900 tracking-tight">充电服务中心</h2>
-        <p class="text-sm text-slate-500 mt-1">欢迎回来，<span class="font-mono text-emerald-600">{{ username }}</span></p>
+        <h2 class="view-title">充电服务中心</h2>
+        <p class="view-subtitle">欢迎回来，<span class="font-mono text-orange-600">{{ username }}</span></p>
       </div>
       <div
         v-if="toast"
-        class="px-4 py-2 rounded-xl text-xs font-medium border"
+        class="px-4 py-2 rounded-lg text-xs font-medium border"
+        role="status"
+        aria-live="polite"
         :class="{
           'bg-emerald-500/10 text-emerald-600 border-emerald-500/20': toast.type === 'success',
           'bg-rose-500/10 text-rose-600 border-rose-500/20': toast.type === 'error',
@@ -268,24 +270,24 @@ const statusColor: Record<string, string> = {
     </div>
 
     <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
-      <section class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-        <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider mb-5">提交充电请求</h3>
+      <section class="panel p-6">
+        <h3 class="text-sm font-semibold text-slate-900 uppercase mb-5">提交充电请求</h3>
         <div class="space-y-4">
           <div>
             <label class="block text-xs font-semibold text-slate-500 mb-2">充电模式</label>
             <div class="flex gap-2">
               <button
                 type="button"
-                class="flex-1 py-2.5 rounded-xl text-xs font-bold border transition-all"
-                :class="requestForm.chargeMode === 'FAST' ? 'bg-emerald-500 text-slate-950 border-emerald-500' : 'bg-slate-50 text-slate-600 border-slate-200'"
+                class="flex-1 min-h-11 py-2.5 rounded-lg text-xs font-semibold border transition-colors"
+                :class="requestForm.chargeMode === 'FAST' ? 'bg-orange-500 text-white border-orange-500' : 'bg-slate-50 text-slate-600 border-slate-200'"
                 @click="requestForm.chargeMode = 'FAST'"
               >
                 快充 FAST
               </button>
               <button
                 type="button"
-                class="flex-1 py-2.5 rounded-xl text-xs font-bold border transition-all"
-                :class="requestForm.chargeMode === 'SLOW' ? 'bg-emerald-500 text-slate-950 border-emerald-500' : 'bg-slate-50 text-slate-600 border-slate-200'"
+                class="flex-1 min-h-11 py-2.5 rounded-lg text-xs font-semibold border transition-colors"
+                :class="requestForm.chargeMode === 'SLOW' ? 'bg-orange-500 text-white border-orange-500' : 'bg-slate-50 text-slate-600 border-slate-200'"
                 @click="requestForm.chargeMode = 'SLOW'"
               >
                 慢充 SLOW
@@ -299,11 +301,11 @@ const statusColor: Record<string, string> = {
               type="number"
               min="1"
               step="5"
-              class="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm font-mono focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10"
+              class="form-control font-mono"
             />
           </div>
           <p
-            class="text-[11px] rounded-xl px-3 py-2 border"
+            class="text-[11px] rounded-lg px-3 py-2 border"
             :class="canModify ? 'text-amber-700 bg-amber-50 border-amber-200' : 'text-slate-500 bg-slate-50 border-slate-200'"
           >
             {{ canModify
@@ -313,10 +315,10 @@ const statusColor: Record<string, string> = {
                 : '提交充电请求后，在等候区状态下可修改模式与电量。' }}
           </p>
           <div class="flex flex-wrap gap-2 pt-1">
-            <button class="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold rounded-xl" @click="submitRequest">提交请求</button>
-            <button class="px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl" @click="queryQueue">查询排队</button>
+            <button class="btn-primary text-xs" @click="submitRequest">提交请求</button>
+            <button class="btn-secondary text-xs" @click="queryQueue">查询排队</button>
             <button
-              class="px-4 py-2.5 text-xs font-bold rounded-xl border transition-all"
+              class="min-h-11 px-4 py-2.5 text-xs font-semibold rounded-lg border transition-colors"
               :class="canModify ? 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700' : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'"
               :disabled="!canModify"
               @click="modifyMode"
@@ -324,7 +326,7 @@ const statusColor: Record<string, string> = {
               修改模式
             </button>
             <button
-              class="px-4 py-2.5 text-xs font-bold rounded-xl border transition-all"
+              class="min-h-11 px-4 py-2.5 text-xs font-semibold rounded-lg border transition-colors"
               :class="canModify ? 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700' : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'"
               :disabled="!canModify"
               @click="modifyAmount"
@@ -335,45 +337,45 @@ const statusColor: Record<string, string> = {
         </div>
       </section>
 
-      <section class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-        <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider mb-5">当前订单</h3>
+      <section class="panel p-6">
+        <h3 class="text-sm font-semibold text-slate-900 uppercase mb-5">当前订单</h3>
         <div class="grid grid-cols-2 gap-3 mb-5">
-          <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
+          <div class="panel-muted p-3">
             <p class="text-[10px] text-slate-500 uppercase">排队号</p>
             <p class="text-lg font-bold font-mono text-slate-900 mt-1">{{ queueStatus.queueNo }}</p>
           </div>
-          <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
+          <div class="panel-muted p-3">
             <p class="text-[10px] text-slate-500 uppercase">状态</p>
             <span class="inline-block mt-1 px-2 py-1 rounded-lg text-[10px] font-bold border" :class="statusColor[queueStatus.status] ?? statusColor.WAITING">
               {{ displayStatus }}
             </span>
           </div>
-          <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
+          <div class="panel-muted p-3">
             <p class="text-[10px] text-slate-500 uppercase">区域</p>
             <p class="text-sm font-bold font-mono text-slate-900 mt-1">{{ queueStatus.queueArea }}</p>
           </div>
-          <div class="bg-slate-50 rounded-xl p-3 border border-slate-100">
+          <div class="panel-muted p-3">
             <p class="text-[10px] text-slate-500 uppercase">预计等待</p>
             <p class="text-sm font-bold font-mono text-slate-900 mt-1">{{ queueStatus.estimatedWaitTime }} 分钟</p>
           </div>
         </div>
-        <div v-if="queueStatus.recoverable" class="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+        <div v-if="queueStatus.recoverable" class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
           该订单因充电桩故障暂停。管理员恢复充电桩后，系统会将订单放回原桩队首并自动继续充电。
         </div>
         <div class="flex flex-wrap gap-2">
-          <button class="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold rounded-xl" @click="stopCharging">结束充电</button>
-          <button class="px-4 py-2.5 bg-rose-500 hover:bg-rose-400 text-white text-xs font-bold rounded-xl" @click="cancelCharging">取消充电</button>
+          <button class="btn-primary text-xs" @click="stopCharging">结束充电</button>
+          <button class="btn-danger text-xs" @click="cancelCharging">取消充电</button>
         </div>
       </section>
     </div>
 
-    <section class="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-      <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wider mb-5">充电详单</h3>
-      <div v-if="details.length === 0" class="text-sm text-slate-500 py-8 text-center border border-dashed border-slate-200 rounded-xl">
+    <section class="panel p-6">
+      <h3 class="text-sm font-semibold text-slate-900 uppercase mb-5">充电详单</h3>
+      <div v-if="details.length === 0" class="text-sm text-slate-500 py-8 text-center border border-dashed border-slate-200 rounded-lg">
         暂无详单记录
       </div>
       <div v-else class="overflow-x-auto">
-        <table class="w-full text-left text-xs">
+        <table class="data-table">
           <thead>
             <tr class="border-b border-slate-200 text-slate-500 uppercase tracking-wider">
               <th class="py-3 pr-4">详单编号</th>

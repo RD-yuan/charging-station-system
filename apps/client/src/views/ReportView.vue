@@ -74,27 +74,27 @@ const pileStats = computed(() => {
 <template>
   <div class="space-y-6 font-sans">
     <!-- View Header -->
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-5">
+    <div class="view-header">
       <div>
-        <h2 class="text-xl font-bold text-slate-900 tracking-tight">运营统计报表 (Operational Reports)</h2>
-        <p class="text-xs text-slate-500 mt-1">汇总各计费时段、充电桩累计充能次数、时长、电量与收益统计</p>
+        <h2 class="view-title">运营统计报表 (Operational Reports)</h2>
+        <p class="view-subtitle">汇总各计费时段、充电桩累计充能次数、时长、电量与收益统计</p>
       </div>
-      <div class="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
+      <div class="segmented shrink-0">
         <button 
           @click="emit('change-time-type', 'DAY')"
-          :class="`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${timeType === 'DAY' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
+          :class="`min-h-10 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${timeType === 'DAY' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
         >
           日报表 (Daily)
         </button>
         <button 
           @click="emit('change-time-type', 'WEEK')"
-          :class="`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${timeType === 'WEEK' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
+          :class="`min-h-10 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${timeType === 'WEEK' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
         >
           周报表 (Weekly)
         </button>
         <button 
           @click="emit('change-time-type', 'MONTH')"
-          :class="`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${timeType === 'MONTH' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
+          :class="`min-h-10 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${timeType === 'MONTH' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`"
         >
           月报表 (Monthly)
         </button>
@@ -103,19 +103,19 @@ const pileStats = computed(() => {
 
     <!-- Core aggregations -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4" id="stats-aggregations">
-      <div class="bg-slate-50 p-4 rounded-xl border border-slate-150">
+      <div class="panel-muted p-4">
         <p class="text-[10px] uppercase font-bold text-slate-400 font-mono">累计电容量消耗</p>
         <p class="text-lg font-bold font-mono text-slate-900 mt-1">{{ aggregatedStats.totalEnergy }} <span class="text-xs font-normal text-slate-500">kWh</span></p>
       </div>
-      <div class="bg-slate-50 p-4 rounded-xl border border-slate-150">
+      <div class="panel-muted p-4">
         <p class="text-[10px] uppercase font-bold text-slate-400 font-mono">累计充电总收益</p>
         <p class="text-lg font-bold font-mono text-emerald-600 mt-1">¥{{ aggregatedStats.totalRevenue }}</p>
       </div>
-      <div class="bg-slate-50 p-4 rounded-xl border border-slate-150">
+      <div class="panel-muted p-4">
         <p class="text-[10px] uppercase font-bold text-slate-400 font-mono">总服务费部分</p>
         <p class="text-lg font-bold font-mono text-slate-800 mt-1">¥{{ aggregatedStats.totalService }}</p>
       </div>
-      <div class="bg-slate-50 p-4 rounded-xl border border-slate-150">
+      <div class="panel-muted p-4">
         <p class="text-[10px] uppercase font-bold text-slate-400 font-mono">单车平均充能用时</p>
         <p class="text-lg font-bold font-mono text-slate-900 mt-1">{{ aggregatedStats.avgDuration }} <span class="text-xs font-normal text-slate-500">分钟</span></p>
       </div>
@@ -125,11 +125,12 @@ const pileStats = computed(() => {
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       
       <!-- Table pile breakdown -->
-      <div class="lg:col-span-2 bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+      <div class="panel lg:col-span-2 overflow-hidden">
         <div class="p-4 bg-slate-50 border-b border-slate-100">
           <h3 class="text-sm font-bold text-slate-900">充电桩设备级综合统计 (Equipment Statistics)</h3>
         </div>
-        <table class="w-full text-left text-xs" id="reports-pile-table">
+        <div class="table-wrap">
+        <table class="data-table" id="reports-pile-table">
           <thead>
             <tr class="bg-slate-100/30 text-slate-500 font-semibold border-b border-slate-100">
               <th class="px-5 py-3">充电桩号</th>
@@ -147,12 +148,13 @@ const pileStats = computed(() => {
             </tr>
           </tbody>
         </table>
+        </div>
       </div>
 
       <!-- ECharts visualization panel container -->
-      <div class="bg-slate-900 text-slate-100 rounded-xl p-5 border border-slate-800 flex flex-col justify-between">
+      <div class="rounded-lg bg-slate-950 text-slate-100 p-5 border border-slate-800 flex flex-col justify-between shadow-sm">
         <div>
-          <h4 class="text-xs font-bold uppercase tracking-wider text-emerald-400 font-mono">⚡ 充电站能效可视化占比 (ECharts Layout)</h4>
+          <h4 class="text-xs font-bold uppercase text-emerald-300 font-mono">充电站能效可视化占比 (ECharts Layout)</h4>
           <p class="text-[10px] text-slate-400 mt-0.5 mb-4">通过 ECharts 插件对日/周营收趋势比例建模</p>
 
           <div class="mb-4 space-y-2.5">
@@ -174,22 +176,23 @@ const pileStats = computed(() => {
           </div>
         </div>
 
-        <div class="pt-4 border-t border-slate-800 text-[10px] text-slate-400 font-mono leading-relaxed bg-slate-950/40 p-3 rounded-lg border border-slate-800/80">
-          💼 <strong class="text-slate-200">系统数据符合性提示：</strong><br />
+          <div class="pt-4 border-t border-slate-800 text-[10px] text-slate-400 font-mono leading-relaxed bg-slate-900/70 p-3 rounded-lg border border-slate-800/80">
+          <strong class="text-slate-200">系统数据符合性提示：</strong><br />
           当前报表字段和明细，完全适用于答辩现场 Excel 填表单的数据交叉核算程序。
         </div>
       </div>
     </div>
 
     <!-- Raw details list -->
-    <div class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+    <div class="panel overflow-hidden">
       <div class="p-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
         <h3 class="text-sm font-bold text-slate-900">交班详单流水单证 (Billing Records)</h3>
         <span class="text-[10px] font-mono bg-slate-100 text-slate-500 border border-slate-200 px-2 py-0.5 rounded">
           共 {{ billingHistory.length }} 条明细
         </span>
       </div>
-      <table class="w-full text-left text-xs" id="reports-billing-table">
+      <div class="table-wrap">
+      <table class="data-table" id="reports-billing-table">
         <thead>
           <tr class="bg-slate-100/30 text-slate-500 font-semibold border-b border-slate-100">
             <th class="px-5 py-2.5">账单号</th>
@@ -215,6 +218,7 @@ const pileStats = computed(() => {
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
 
   </div>

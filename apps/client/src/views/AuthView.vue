@@ -148,39 +148,36 @@ function handleFormSubmit(e: Event) {
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-950 flex flex-col justify-center items-center px-4 relative overflow-hidden font-sans">
-    <div class="absolute top-0 left-0 w-full h-full pointer-events-none z-0 overflow-hidden">
-      <div class="absolute top-[-20%] left-[-10%] w-[50vw] h-[50vw] bg-emerald-500/5 rounded-full blur-[120px]"></div>
-      <div class="absolute bottom-[-20%] right-[-10%] w-[50vw] h-[50vw] bg-blue-500/5 rounded-full blur-[120px]"></div>
-    </div>
+  <div class="min-h-dvh bg-slate-950 flex flex-col justify-center items-center px-4 py-10 relative overflow-hidden font-sans">
+    <div class="absolute inset-0 pointer-events-none z-0 bg-[linear-gradient(135deg,rgba(249,115,22,0.10),transparent_34%),repeating-linear-gradient(90deg,rgba(255,255,255,0.035)_0_1px,transparent_1px_72px),repeating-linear-gradient(0deg,rgba(255,255,255,0.035)_0_1px,transparent_1px_72px)]"></div>
 
     <div class="w-full max-w-md relative z-10 space-y-4">
-      <div class="flex p-1 bg-slate-900/80 border border-slate-800 rounded-xl backdrop-blur-md">
+      <div class="flex p-1 bg-slate-900/90 border border-slate-800 rounded-lg">
         <button
           type="button"
-          class="flex-1 py-2.5 text-xs font-bold rounded-lg transition-all"
-          :class="isUserMode ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20' : 'text-slate-400 hover:text-slate-200'"
+          class="flex-1 min-h-11 py-2.5 text-sm font-semibold rounded-md transition-colors"
+          :class="isUserMode ? 'bg-orange-500 text-white shadow-md shadow-orange-950/30' : 'text-slate-400 hover:text-slate-200'"
           @click="switchMode('user')"
         >
           用户端
         </button>
         <button
           type="button"
-          class="flex-1 py-2.5 text-xs font-bold rounded-lg transition-all"
-          :class="!isUserMode ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20' : 'text-slate-400 hover:text-slate-200'"
+          class="flex-1 min-h-11 py-2.5 text-sm font-semibold rounded-md transition-colors"
+          :class="!isUserMode ? 'bg-orange-500 text-white shadow-md shadow-orange-950/30' : 'text-slate-400 hover:text-slate-200'"
           @click="switchMode('admin')"
         >
           管理端
         </button>
       </div>
 
-      <div class="bg-slate-900/80 border border-slate-800/80 p-8 rounded-2xl shadow-2xl backdrop-blur-md">
+      <div class="bg-slate-900/95 border border-slate-800 p-8 rounded-lg shadow-2xl">
         <div class="text-center mb-8">
-          <div class="inline-flex items-center justify-center bg-emerald-500 text-slate-900 p-3 rounded-2xl mb-4 font-bold shadow-lg shadow-emerald-500/10">
+          <div class="inline-flex items-center justify-center bg-orange-500 text-white p-3 rounded-lg mb-4 font-bold shadow-lg shadow-orange-950/30">
             <svg v-if="isUserMode" xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/></svg>
             <svg v-else xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12" y1="16" y2="16"/></svg>
           </div>
-          <h2 class="text-2xl font-bold text-white tracking-tight leading-tight">
+          <h2 class="text-2xl font-semibold text-white leading-tight">
             {{ isUserMode ? '智能充电用户服务' : '调度与计费管理后台' }}
           </h2>
           <p class="text-xs text-slate-400 mt-2 font-mono">
@@ -191,16 +188,16 @@ function handleFormSubmit(e: Event) {
         <div v-if="isUserMode" class="flex p-1 mb-5 bg-slate-950/60 border border-slate-800 rounded-lg">
           <button
             type="button"
-            class="flex-1 py-2 text-xs font-bold rounded-md transition-all"
-            :class="userAuthTab === 'login' ? 'bg-slate-800 text-emerald-400' : 'text-slate-500 hover:text-slate-300'"
+            class="flex-1 min-h-10 py-2 text-xs font-semibold rounded-md transition-colors"
+            :class="userAuthTab === 'login' ? 'bg-slate-800 text-orange-300' : 'text-slate-500 hover:text-slate-300'"
             @click="userAuthTab = 'login'"
           >
             登录
           </button>
           <button
             type="button"
-            class="flex-1 py-2 text-xs font-bold rounded-md transition-all"
-            :class="userAuthTab === 'register' ? 'bg-slate-800 text-emerald-400' : 'text-slate-500 hover:text-slate-300'"
+            class="flex-1 min-h-10 py-2 text-xs font-semibold rounded-md transition-colors"
+            :class="userAuthTab === 'register' ? 'bg-slate-800 text-orange-300' : 'text-slate-500 hover:text-slate-300'"
             @click="userAuthTab = 'register'"
           >
             注册
@@ -209,44 +206,44 @@ function handleFormSubmit(e: Event) {
 
         <form class="space-y-5" novalidate @submit.prevent="handleFormSubmit">
           <div>
-            <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">用户名</label>
+            <label class="block text-xs font-semibold text-slate-300 uppercase mb-2">用户名</label>
             <input
               v-model="username"
               type="text"
               required
-              class="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500/80 rounded-xl py-3 px-4 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all font-mono"
+              class="dark-form-control font-mono"
               :placeholder="isUserMode ? '请输入用户账户' : '请输入管理员账户'"
             />
           </div>
 
           <div>
-            <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">密码</label>
+            <label class="block text-xs font-semibold text-slate-300 uppercase mb-2">密码</label>
             <input
               v-model="password"
               type="password"
               required
-              class="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500/80 rounded-xl py-3 px-4 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all font-mono"
+              class="dark-form-control font-mono"
               placeholder="请输入密码"
             />
           </div>
 
           <div v-if="isRegisterTab">
-            <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">电池容量 (kWh)</label>
+            <label class="block text-xs font-semibold text-slate-300 uppercase mb-2">电池容量 (kWh)</label>
             <input
               v-model.number="batteryCapacity"
               type="number"
               min="1"
               step="1"
               required
-              class="w-full bg-slate-950 border border-slate-800 focus:border-emerald-500/80 rounded-xl py-3 px-4 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all font-mono"
+              class="dark-form-control font-mono"
             />
             <p class="text-[10px] text-slate-500 mt-1.5">仅注册时需要填写</p>
           </div>
 
-          <div v-if="errorMsg" class="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-400">
+          <div v-if="errorMsg" class="p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg text-xs text-rose-300">
             {{ errorMsg }}
           </div>
-          <div v-if="successMsg" class="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-400">
+          <div v-if="successMsg" class="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-xs text-emerald-300">
             {{ successMsg }}
           </div>
 
@@ -255,7 +252,7 @@ function handleFormSubmit(e: Event) {
               v-if="!isRegisterTab"
               type="submit"
               :disabled="isLoading"
-              class="flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold py-3.5 px-4 rounded-xl text-xs tracking-wider uppercase shadow-lg shadow-emerald-500/15 transition-all"
+              class="btn-primary flex-1 uppercase"
             >
               {{ isLoading ? '处理中...' : isUserMode ? '登录' : '进入管理面板' }}
             </button>
@@ -263,7 +260,7 @@ function handleFormSubmit(e: Event) {
               v-else
               type="submit"
               :disabled="isLoading"
-              class="flex-1 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold py-3.5 px-4 rounded-xl text-xs tracking-wider uppercase shadow-lg shadow-emerald-500/15 transition-all"
+              class="btn-primary flex-1 uppercase"
             >
               {{ isLoading ? '处理中...' : '注册并进入' }}
             </button>
