@@ -175,6 +175,13 @@ async function handleReportTimeTypeChange(timeType: 'DAY' | 'WEEK' | 'MONTH') {
   await runAdminOperation(loadReports)
 }
 
+function handleTabChange(tab: string) {
+  currentTab.value = tab
+  if (tab === 'reports') {
+    void runAdminOperation(loadReports)
+  }
+}
+
 function connectSocket() {
   if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return
   socket = new WebSocket(wsUrl())
@@ -293,7 +300,7 @@ async function runAdminOperation(operation: () => Promise<void>) {
     <Sidebar
       :currentTab="currentTab"
       :adminName="adminName"
-      @update:currentTab="currentTab = $event"
+      @update:currentTab="handleTabChange"
       @logout="onLogout"
     />
 
