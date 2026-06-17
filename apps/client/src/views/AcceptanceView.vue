@@ -206,7 +206,7 @@ function statusClass(status: string) {
 
 <template>
   <div class="space-y-5">
-    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div class="panel p-6">
       <div class="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h2 class="text-lg font-semibold text-slate-800">作业验收自动化测试</h2>
@@ -218,14 +218,14 @@ function statusClass(status: string) {
           <button
             @click="resetWorld"
             :disabled="running"
-            class="px-3 py-1.5 text-xs font-medium rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+            class="min-h-11 px-3 py-2 text-xs font-semibold rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50 transition-colors"
           >
             清空数据
           </button>
           <button
             @click="runTests"
             :disabled="running"
-            class="px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 shadow-sm"
+            class="btn-primary"
           >
             {{ running ? '运行中…' : '运行测试用例' }}
           </button>
@@ -251,12 +251,12 @@ function statusClass(status: string) {
           <div class="text-[11px] font-bold text-amber-900 mb-1">扩展调度演示（PS 选做）</div>
           <div class="flex gap-2">
             <button
-              class="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-white text-[11px] font-bold rounded disabled:opacity-40"
+            class="min-h-10 px-3 py-2 bg-amber-500 hover:bg-amber-400 text-white text-[11px] font-bold rounded-lg disabled:opacity-40 transition-colors"
               :disabled="demoLoading"
               @click="runSingleOptimalDemo"
             >a) 单次最优调度(FAST)</button>
             <button
-              class="px-3 py-1.5 bg-orange-500 hover:bg-orange-400 text-white text-[11px] font-bold rounded disabled:opacity-40"
+            class="min-h-10 px-3 py-2 bg-orange-500 hover:bg-orange-400 text-white text-[11px] font-bold rounded-lg disabled:opacity-40 transition-colors"
               :disabled="demoLoading"
               @click="runBatchOptimalDemo"
             >b) 批量最优调度</button>
@@ -276,7 +276,7 @@ function statusClass(status: string) {
       <p v-if="error" class="mt-3 text-xs text-rose-600">{{ error }}</p>
     </div>
 
-    <div v-if="report" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div v-if="report" class="panel p-6">
       <div class="flex items-center justify-between flex-wrap gap-3">
         <div class="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs flex-1">
           <div class="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
@@ -307,7 +307,7 @@ function statusClass(status: string) {
           v-if="downloadUrl"
           :href="downloadUrl"
           :download="downloadFilename"
-          class="px-3 py-2 text-xs font-semibold rounded-lg border border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+          class="min-h-11 px-3 py-2 text-xs font-semibold rounded-lg border border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 inline-flex items-center"
         >
           下载结果 Excel
         </a>
@@ -317,19 +317,19 @@ function statusClass(status: string) {
         <span class="text-slate-500">过滤：</span>
         <button
           @click="filterMode = 'all'"
-          :class="['px-2 py-1 rounded border', filterMode === 'all' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white border-slate-200 text-slate-600']"
+          :class="['min-h-10 px-3 py-1 rounded-lg border text-xs font-semibold transition-colors', filterMode === 'all' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white border-slate-200 text-slate-600']"
         >全部</button>
         <button
           @click="filterMode = 'sample'"
-          :class="['px-2 py-1 rounded border', filterMode === 'sample' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white border-slate-200 text-slate-600']"
+          :class="['min-h-10 px-3 py-1 rounded-lg border text-xs font-semibold transition-colors', filterMode === 'sample' ? 'bg-slate-800 text-white border-slate-800' : 'bg-white border-slate-200 text-slate-600']"
         >仅有样本</button>
         <button
           @click="filterMode = 'fail'"
-          :class="['px-2 py-1 rounded border', filterMode === 'fail' ? 'bg-rose-600 text-white border-rose-600' : 'bg-white border-slate-200 text-slate-600']"
+          :class="['min-h-10 px-3 py-1 rounded-lg border text-xs font-semibold transition-colors', filterMode === 'fail' ? 'bg-rose-600 text-white border-rose-600' : 'bg-white border-slate-200 text-slate-600']"
         >仅失败</button>
       </div>
 
-      <div class="mt-3 overflow-x-auto rounded-xl border border-slate-200">
+      <div class="mt-3 table-wrap rounded-lg border border-slate-200">
         <table class="min-w-full text-[11px]">
           <thead class="bg-slate-50 text-slate-600">
             <tr>

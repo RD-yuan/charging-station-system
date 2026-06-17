@@ -53,16 +53,16 @@ const handleReschedule = (pileId: string) => {
 <template>
   <div class="space-y-6 font-sans">
     <!-- View Header -->
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-5">
+    <div class="view-header">
       <div>
-        <h2 class="text-xl font-bold text-slate-900 tracking-tight">电桩状态监控 (Piles & Queues Monitor)</h2>
-        <p class="text-xs text-slate-500 mt-1">支持管理员启停充电桩、单独上报故障、修改故障车辆重调度重组策略</p>
+        <h2 class="view-title">电桩状态监控 (Piles & Queues Monitor)</h2>
+        <p class="view-subtitle">支持管理员启停充电桩、单独上报故障、修改故障车辆重调度重组策略</p>
       </div>
-      <div class="flex items-center gap-3">
-        <label class="text-xs font-semibold text-slate-600 font-mono shrink-0">重调度策略配置:</label>
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+        <label class="text-xs font-semibold text-slate-600 font-mono shrink-0">重调度策略配置</label>
         <select 
           v-model="selectedRescheduleStrategy"
-          class="bg-white border border-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-slate-700 font-medium"
+          class="form-control max-w-full sm:w-80"
         >
           <option value="TIME_ORDER">按原登记排队号顺序重排 (推荐)</option>
           <option value="PRIORITY_QUEUE">高优先级紧急车队最前列排定</option>
@@ -77,9 +77,13 @@ const handleReschedule = (pileId: string) => {
         :key="pile.id"
         :id="`pile-card-${pile.id}`"
         @click="selectPile(pile.id)"
-        :class="`bg-white rounded-xl border transition-all duration-300 overflow-hidden ${
+        role="button"
+        tabindex="0"
+        @keydown.enter.prevent="selectPile(pile.id)"
+        @keydown.space.prevent="selectPile(pile.id)"
+        :class="`panel overflow-hidden transition-colors duration-200 ${
           pile.workingState === 'FAULT'
-            ? 'border-rose-300 shadow-rose-100/50 shadow-md'
+            ? 'border-rose-300 shadow-rose-100/50'
             : activePivotPileId === pile.id
             ? 'border-emerald-500 ring-2 ring-emerald-500/10'
             : 'border-slate-200 hover:border-slate-300'
@@ -173,13 +177,13 @@ const handleReschedule = (pileId: string) => {
                 :key="car.id"
                 :class="`p-3 rounded-lg border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs font-mono ${
                   idx === 0
-                    ? 'bg-emerald-50/40 border-emerald-100/80 shadow-xs' 
-                    : 'bg-slate-50/50 border-slate-150'
+                    ? 'bg-emerald-50/40 border-emerald-100/80 shadow-sm'
+                    : 'bg-slate-50/50 border-slate-200'
                 }`"
               >
                 <div>
                   <div class="flex items-center gap-1.5">
-                    <span :class="`px-1.5 py-0.2 rounded text-[10px] font-bold ${idx === 0 ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`">
+                    <span :class="`px-1.5 py-0.5 rounded text-[10px] font-bold ${idx === 0 ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`">
                       {{ idx === 0 ? '首车' : '等候' }}
                     </span>
                     <span class="font-bold text-slate-900">{{ car.queueNo }}</span>
@@ -213,8 +217,8 @@ const handleReschedule = (pileId: string) => {
           <div class="pt-3 border-t border-slate-100 flex flex-wrap items-center gap-2">
             <!-- Toggle Power -->
             <button
-              @click="emit('toggle-power', pile.id)"
-              :class="`px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wide transition-all border outline-none cursor-pointer ${
+              @click.stop="emit('toggle-power', pile.id)"
+              :class="`min-h-11 px-3 py-2 rounded-lg text-xs font-semibold transition-colors border outline-none ${
                 pile.physicalState === 'ON'
                   ? 'bg-rose-50 text-rose-700 border-rose-100 hover:bg-rose-100/60'
                   : 'bg-slate-900 text-slate-100 border-slate-950 hover:bg-slate-800'
@@ -226,8 +230,8 @@ const handleReschedule = (pileId: string) => {
             <!-- Fault Simulator -->
             <button
               v-if="pile.physicalState === 'ON' && pile.workingState !== 'FAULT'"
-              @click="emit('report-fault', pile.id)"
-              class="px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wide bg-rose-600 text-white border border-rose-700 hover:bg-rose-500 outline-none cursor-pointer"
+              @click.stop="emit('report-fault', pile.id)"
+              class="min-h-11 px-3 py-2 rounded-lg text-xs font-semibold bg-rose-600 text-white border border-rose-700 hover:bg-rose-500 outline-none transition-colors"
             >
               上报硬件故障
             </button>
@@ -235,17 +239,17 @@ const handleReschedule = (pileId: string) => {
             <!-- Fault Recovery -->
             <button
               v-if="pile.workingState === 'FAULT'"
-              @click="emit('recover-pile', pile.id)"
-              class="px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wide bg-emerald-500 text-slate-950 border border-emerald-600 hover:bg-emerald-400 outline-none cursor-pointer"
+              @click.stop="emit('recover-pile', pile.id)"
+              class="min-h-11 px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-500 text-slate-950 border border-emerald-600 hover:bg-emerald-400 outline-none transition-colors"
             >
-              故障电器恢复
+              故障电桩恢复
             </button>
 
             <!-- Manual Reschedule (Only shown during fault state and are items wait in queue) -->
             <button
               v-if="pile.workingState === 'FAULT' && pile.queue.some((car) => car.status === 'IN_PILE_QUEUE')"
-              @click="handleReschedule(pile.id)"
-              class="ml-auto px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wide bg-amber-500 text-slate-950 hover:bg-amber-400 outline-none border border-amber-600 cursor-pointer animate-bounce"
+              @click.stop="handleReschedule(pile.id)"
+              class="ml-auto min-h-11 px-3 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-slate-950 hover:bg-amber-400 outline-none border border-amber-600 transition-colors"
             >
               立刻触发新调度 ({{ selectedRescheduleStrategy === 'TIME_ORDER' ? '按排队重排' : '紧急车优先' }})
             </button>

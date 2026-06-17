@@ -289,7 +289,7 @@ async function runAdminOperation(operation: () => Promise<void>) {
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-100 flex font-sans" id="root-portal">
+  <div class="app-shell font-sans" id="root-portal">
     <Sidebar
       :currentTab="currentTab"
       :adminName="adminName"
@@ -297,9 +297,9 @@ async function runAdminOperation(operation: () => Promise<void>) {
       @logout="onLogout"
     />
 
-    <main class="flex-1 overflow-y-auto p-6 md:p-8 bg-slate-50">
-      <div class="max-w-7xl mx-auto space-y-6">
-        <div v-if="adminError" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+    <main class="app-main">
+      <div class="shell-container">
+        <div v-if="adminError" class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           {{ adminError }}
         </div>
         <DashboardView v-if="currentTab === 'dashboard'" :piles="piles" :waitingQueue="waitingQueue" />

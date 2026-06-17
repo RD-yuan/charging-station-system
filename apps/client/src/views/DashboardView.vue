@@ -83,12 +83,12 @@ const slowPilesCount = computed(() => {
 <template>
   <div class="space-y-6 font-sans">
     <!-- Header banner -->
-    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-5">
+    <div class="view-header">
       <div>
-        <h2 class="text-xl font-bold text-slate-900 tracking-tight">控制台概览 (Dashboard)</h2>
-        <p class="text-xs text-slate-500 mt-1">充电桩实时负载状态与基础调度信息系统</p>
+        <h2 class="view-title">控制台概览 (Dashboard)</h2>
+        <p class="view-subtitle">充电桩实时负载状态与基础调度信息系统</p>
       </div>
-      <div class="flex items-center gap-2 text-xs font-mono bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
+      <div class="flex min-h-11 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-mono shadow-sm">
         <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
         <span class="text-slate-600 font-medium">系统时钟: {{ simTime }} (演示速率 1:10)</span>
       </div>
@@ -97,10 +97,10 @@ const slowPilesCount = computed(() => {
     <!-- Info Metrics Grid -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       <!-- Direct metrics 1 -->
-      <div class="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+      <div class="metric-card flex items-center justify-between gap-4">
         <div>
-          <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">电桩开启数 (ON)</p>
-          <h3 class="text-2xl font-bold text-slate-950 mt-1 font-mono">
+          <p class="metric-label">电桩开启数 (ON)</p>
+          <h3 class="metric-value">
             {{ activePilesCount }} <span class="text-sm font-normal text-slate-500">/ {{ piles.length }}</span>
           </h3>
           <p class="text-[10px] text-slate-500 mt-1.5 flex items-center gap-1">
@@ -109,47 +109,47 @@ const slowPilesCount = computed(() => {
             <span>慢充 {{ slowPilesCount }} 个</span>
           </p>
         </div>
-        <div class="rounded-xl p-3 bg-emerald-500/10 text-emerald-600 font-bold">
+        <div class="icon-tile border-emerald-200 bg-emerald-50 text-emerald-700">
           <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-zap"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
         </div>
       </div>
 
       <!-- Direct metrics 2 -->
-      <div class="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+      <div class="metric-card flex items-center justify-between gap-4">
         <div>
-          <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">正在充电中 (CHARGING)</p>
-          <h3 class="text-2xl font-bold text-slate-950 mt-1 font-mono">
+          <p class="metric-label">正在充电中 (CHARGING)</p>
+          <h3 class="metric-value">
             {{ chargingPilesCount }} <span class="text-sm font-normal text-slate-500">/ {{ activePilesCount }}</span>
           </h3>
           <p class="text-[10px] text-emerald-600 font-semibold mt-1.5">
             整体设备负载率: {{ Math.round((chargingPilesCount / (activePilesCount || 1)) * 100) }}%
           </p>
         </div>
-        <div class="rounded-xl p-3 bg-blue-500/10 text-blue-600 font-bold">
+        <div class="icon-tile border-blue-200 bg-blue-50 text-blue-700">
           <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-battery-charging"><path d="M15 7h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-1"/><path d="M6 7H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M11 7h2"/><polyline points="10 12 12 10 12 14 14 12"/></svg>
         </div>
       </div>
 
       <!-- Direct metrics 3 -->
-      <div class="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+      <div class="metric-card flex items-center justify-between gap-4">
         <div>
-          <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">等候区派单 (WAITING)</p>
-          <h3 class="text-2xl font-bold text-slate-950 mt-1 font-mono">
+          <p class="metric-label">等候区派单 (WAITING)</p>
+          <h3 class="metric-value">
             {{ totalWaitingCount }} <span class="text-sm font-normal text-slate-500">部</span>
           </h3>
           <p class="text-[10px] text-slate-500 mt-1.5">
             等待系统基础调度方案分派车位
           </p>
         </div>
-        <div class="rounded-xl p-3 bg-amber-500/10 text-amber-600 font-bold">
+        <div class="icon-tile border-amber-200 bg-amber-50 text-amber-700">
           <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-users"><circle cx="16" cy="21" r="1"/><circle cx="8" cy="21" r="1"/><path d="M17 11V7a5 5 0 0 0-10 0v4"/><polygon points="23 21 1 21 3 11 21 11 23 21"/></svg>
         </div>
       </div>
 
       <!-- Direct metrics 4 -->
-      <div class="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+      <div class="metric-card flex items-center justify-between gap-4">
         <div>
-          <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">故障桩体 (FAULT)</p>
+          <p class="metric-label">故障桩体 (FAULT)</p>
           <h3 class="text-2xl font-semibold mt-1 font-mono" :class="faultPilesCount > 0 ? 'text-rose-600 font-bold' : 'text-slate-950'">
             {{ faultPilesCount }} <span class="text-sm font-normal text-slate-500">处</span>
           </h3>
@@ -157,7 +157,7 @@ const slowPilesCount = computed(() => {
             {{ faultPilesCount > 0 ? '触发重调度机制' : '全网充电桩运行正常' }}
           </p>
         </div>
-        <div class="rounded-xl p-3 bg-red-500/10 text-red-600 font-bold">
+        <div class="icon-tile border-rose-200 bg-rose-50 text-rose-700">
           <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield-alert"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12" y1="16" y2="16"/></svg>
         </div>
       </div>
@@ -166,19 +166,19 @@ const slowPilesCount = computed(() => {
     <!-- Active Wait List Layout -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <!-- Waiting Queue List -->
-      <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm">
+      <div class="panel lg:col-span-2 overflow-hidden">
         <div class="p-5 border-b border-slate-200/80 flex items-center justify-between">
           <div>
             <h3 class="text-sm font-bold text-slate-900">等候区派单车辆 (Waiting Queue)</h3>
             <p class="text-[10px] text-slate-400 mt-0.5">未获得充电桩位，在等候区待调度的车辆列表</p>
           </div>
-          <span class="text-xs font-mono font-bold bg-slate-100 px-2.5 py-1 rounded text-slate-600 border border-slate-200">
+          <span class="status-pill bg-slate-100 text-slate-600 border-slate-200">
             共 {{ totalWaitingCount }} 辆车
           </span>
         </div>
 
-        <div class="divide-y divide-slate-100 overflow-x-auto">
-          <table class="w-full text-left text-xs" id="dashboard-waiting-table">
+        <div class="table-wrap">
+          <table class="data-table" id="dashboard-waiting-table">
             <thead>
               <tr class="bg-slate-50/50 text-slate-500 font-semibold tracking-wider border-b border-slate-100">
                 <th class="px-6 py-3.5">排队号码</th>
@@ -213,13 +213,13 @@ const slowPilesCount = computed(() => {
       </div>
 
       <!-- Quick Pile Capacity Widget -->
-      <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex flex-col justify-between">
+      <div class="panel p-5 flex flex-col justify-between">
         <div>
           <h3 class="text-sm font-bold text-slate-900">计费时段状态提示</h3>
           <p class="text-[10px] text-slate-400 mt-0.5 mb-4">当前系统计费时段分布（按峰平谷规则计费）</p>
 
           <div class="space-y-3.5">
-            <div class="flex justify-between items-center bg-rose-50 p-2.5 rounded-lg border border-rose-200/50">
+            <div class="flex justify-between items-center gap-3 bg-rose-50 p-3 rounded-lg border border-rose-200/70">
               <div>
                 <p class="text-xs font-bold text-rose-700">高峰时段 (Peak)</p>
                 <p class="text-[10px] text-rose-500 font-mono">10:00-15:00 / 18:00-21:00</p>
@@ -227,7 +227,7 @@ const slowPilesCount = computed(() => {
               <span class="text-xs font-mono font-bold text-rose-700">1.0 元/度</span>
             </div>
 
-            <div class="flex justify-between items-center bg-amber-50 p-2.5 rounded-lg border border-amber-200/50">
+            <div class="flex justify-between items-center gap-3 bg-amber-50 p-3 rounded-lg border border-amber-200/70">
               <div>
                 <p class="text-xs font-bold text-amber-700">平时时段 (Flat)</p>
                 <p class="text-[10px] text-amber-500 font-mono">07:00-10:00 / 15:00-18:00 / 21:00-23:00</p>
@@ -235,7 +235,7 @@ const slowPilesCount = computed(() => {
               <span class="text-xs font-mono font-bold text-amber-700">0.7 元/度</span>
             </div>
 
-            <div class="flex justify-between items-center bg-sky-50 p-2.5 rounded-lg border border-sky-200/50">
+            <div class="flex justify-between items-center gap-3 bg-sky-50 p-3 rounded-lg border border-sky-200/70">
               <div>
                 <p class="text-xs font-bold text-sky-700">谷时时段 (Valley)</p>
                 <p class="text-[10px] text-sky-500 font-mono">23:00-07:00 (次日)</p>
