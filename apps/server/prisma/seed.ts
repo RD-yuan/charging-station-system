@@ -32,12 +32,24 @@ async function main() {
   })
   console.log(`Demo user seeded: ${demoUser.username} (id: ${demoUser.id}, role: ${demoUser.role})`)
 
+  const obsoletePileIds = ['F1', 'F2', 'T1', 'T2', 'T3']
+  const removedObsoletePiles = await prisma.chargingPile.deleteMany({
+    where: {
+      id: { in: obsoletePileIds },
+      orders: { none: {} },
+      sessions: { none: {} }
+    }
+  })
+  if (removedObsoletePiles.count > 0) {
+    console.log(`Obsolete charging piles removed: ${removedObsoletePiles.count}`)
+  }
+
   const piles = [
-    { id: 'F1', pileType: 'FAST' as const, power: Number(process.env.FAST_PILE_POWER ?? 30) },
-    { id: 'F2', pileType: 'FAST' as const, power: Number(process.env.FAST_PILE_POWER ?? 30) },
-    { id: 'T1', pileType: 'SLOW' as const, power: Number(process.env.SLOW_PILE_POWER ?? 10) },
-    { id: 'T2', pileType: 'SLOW' as const, power: Number(process.env.SLOW_PILE_POWER ?? 10) },
-    { id: 'T3', pileType: 'SLOW' as const, power: Number(process.env.SLOW_PILE_POWER ?? 10) }
+    { id: 'F01', pileType: 'FAST' as const, power: Number(process.env.FAST_PILE_POWER ?? 30) },
+    { id: 'F02', pileType: 'FAST' as const, power: Number(process.env.FAST_PILE_POWER ?? 30) },
+    { id: 'T01', pileType: 'SLOW' as const, power: Number(process.env.SLOW_PILE_POWER ?? 10) },
+    { id: 'T02', pileType: 'SLOW' as const, power: Number(process.env.SLOW_PILE_POWER ?? 10) },
+    { id: 'T03', pileType: 'SLOW' as const, power: Number(process.env.SLOW_PILE_POWER ?? 10) }
   ]
   for (const pile of piles) {
     await prisma.chargingPile.upsert({
@@ -56,12 +68,23 @@ async function main() {
     { id: 'rule-v1-flat-night', period: 'FLAT' as const, startMinute: 1260, endMinute: 1380, price: 0.7 },
     { id: 'rule-v1-valley', period: 'VALLEY' as const, startMinute: 1380, endMinute: 420, price: 0.4 }
   ]
+  const now = new Date()
   for (const rule of rules) {
-    await prisma.billingRule.upsert({
-      where: { id: rule.id },
-      update: { ...rule, serviceFeeRate: 0.8, version: 1, active: true },
-      create: { ...rule, serviceFeeRate: 0.8, version: 1, active: true }
-    })
+    await prisma.$executeRaw`
+      INSERT INTO \`BillingRule\`
+        (\`id\`, \`period\`, \`startMinute\`, \`endMinute\`, \`price\`, \`serviceFeeRate\`, \`version\`, \`active\`, \`createdAt\`, \`updatedAt\`)
+      VALUES
+        (${rule.id}, ${rule.period}, ${rule.startMinute}, ${rule.endMinute}, ${rule.price}, ${0.8}, ${1}, ${true}, ${now}, ${now})
+      ON DUPLICATE KEY UPDATE
+        \`period\` = VALUES(\`period\`),
+        \`startMinute\` = VALUES(\`startMinute\`),
+        \`endMinute\` = VALUES(\`endMinute\`),
+        \`price\` = VALUES(\`price\`),
+        \`serviceFeeRate\` = VALUES(\`serviceFeeRate\`),
+        \`version\` = VALUES(\`version\`),
+        \`active\` = VALUES(\`active\`),
+        \`updatedAt\` = VALUES(\`updatedAt\`)
+    `
   }
   console.log(`Billing rules seeded: ${rules.length}`)
 }
