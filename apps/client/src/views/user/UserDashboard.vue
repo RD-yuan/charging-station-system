@@ -15,6 +15,7 @@ const queueStatus = reactive({
   queueNo: '--',
   status: 'WAITING',
   queueArea: '--',
+  assignedPileId: null as string | null,
   aheadCount: 0,
   estimatedWaitTime: 0,
   chargeMode: 'FAST' as 'FAST' | 'SLOW' | undefined,
@@ -30,6 +31,11 @@ let currentOrderRefreshInFlight = false
 const hasValidOrder = computed(() => Boolean(queueStatus.orderId && queueStatus.orderId !== '未生成'))
 const canModify = computed(() => hasValidOrder.value && queueStatus.status === 'WAITING')
 const displayStatus = computed(() => queueStatus.recoverable ? '故障中断，等待自动恢复' : queueStatus.status)
+const displayPile = computed(() => {
+  if (queueStatus.assignedPileId) return `${queueStatus.assignedPileId} 号充电桩`
+  if (queueStatus.status === 'WAITING') return '等候区'
+  return queueStatus.queueArea || '--'
+})
 
 onMounted(() => {
   void restoreDashboard()
@@ -351,8 +357,8 @@ const statusColor: Record<string, string> = {
             </span>
           </div>
           <div class="panel-muted p-3">
-            <p class="text-[10px] text-slate-500 uppercase">区域</p>
-            <p class="text-sm font-bold font-mono text-slate-900 mt-1">{{ queueStatus.queueArea }}</p>
+            <p class="text-[10px] text-slate-500 uppercase">充电桩</p>
+            <p class="text-sm font-bold font-mono text-slate-900 mt-1">{{ displayPile }}</p>
           </div>
           <div class="panel-muted p-3">
             <p class="text-[10px] text-slate-500 uppercase">预计等待</p>
